@@ -1,0 +1,314 @@
+{
+  "element_coordinates": [
+    {
+      "id": "39",
+      "element": "Top advertisement block",
+      "coordinates": [
+        46,
+        38,
+        105,
+        961
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "33",
+      "element": "Long text block within a recipe card",
+      "coordinates": [
+        492,
+        38,
+        526,
+        961
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "35",
+      "element": "Area showing high concentration of different information units (recipe, video)",
+      "coordinates": [
+        108,
+        38,
+        281,
+        961
+      ],
+      "confidence": 0.8
+    },
+    {
+      "id": "27",
+      "element": "Dense text area within a recipe card",
+      "coordinates": [
+        400,
+        38,
+        434,
+        961
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "53",
+      "element": "Area showing multiple block types requiring choice (ad, recipe, video)",
+      "coordinates": [
+        46,
+        38,
+        281,
+        961
+      ],
+      "confidence": 0.8
+    },
+    {
+      "id": "21",
+      "element": "Boundary area between video block and recipe card showing weak separation",
+      "coordinates": [
+        281,
+        38,
+        289,
+        961
+      ],
+      "confidence": 0.7
+    },
+    {
+      "id": "37",
+      "element": "Transition area between video block and recipe block",
+      "coordinates": [
+        281,
+        38,
+        289,
+        961
+      ],
+      "confidence": 0.7
+    },
+    {
+      "id": "17",
+      "element": "Video block with high visual emphasis",
+      "coordinates": [
+        154,
+        38,
+        281,
+        961
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "13",
+      "element": "Boundary between two recipe cards illustrating visual clutter from borders",
+      "coordinates": [
+        343,
+        38,
+        351,
+        961
+      ],
+      "confidence": 0.8
+    },
+    {
+      "id": "43",
+      "element": "Recipe card showing multiple parameters to compare",
+      "coordinates": [
+        351,
+        38,
+        439,
+        961
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "47",
+      "element": "Top advertisement block creating visual load",
+      "coordinates": [
+        46,
+        38,
+        105,
+        961
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "51",
+      "element": "Section showing multiple recipe cards requiring comparison",
+      "coordinates": [
+        289,
+        38,
+        531,
+        961
+      ],
+      "confidence": 0.8
+    },
+    {
+      "id": "57",
+      "element": "Transition area between videos and recipes representing unstable structure",
+      "coordinates": [
+        281,
+        38,
+        289,
+        961
+      ],
+      "confidence": 0.6
+    },
+    {
+      "id": "61",
+      "element": "No visible focus state on cards",
+      "coordinates": null,
+      "confidence": 0.9
+    },
+    {
+      "id": "15",
+      "element": "Green icon area in the top advertisement block with sharp color",
+      "coordinates": [
+        51,
+        45,
+        100,
+        232
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "5",
+      "element": "Minimal white space between two recipe cards",
+      "coordinates": [
+        343,
+        38,
+        351,
+        961
+      ],
+      "confidence": 0.8
+    },
+    {
+      "id": "31",
+      "element": "Recipe card showing title, source, and description with unclear hierarchy",
+      "coordinates": [
+        351,
+        38,
+        439,
+        961
+      ],
+      "confidence": 0.8
+    },
+    {
+      "id": "41",
+      "element": "Top advertisement block blocking upper part of results",
+      "coordinates": [
+        46,
+        38,
+        105,
+        961
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "49",
+      "element": "Missing highlighting or sorting features in recipe list",
+      "coordinates": null,
+      "confidence": 0.9
+    },
+    {
+      "id": "46",
+      "element": "Missing explicit rating labels on recipe cards",
+      "coordinates": null,
+      "confidence": 0.9
+    },
+    {
+      "id": "59",
+      "element": "Block '\u041b\u044e\u0434\u0438 \u0438\u0449\u0443\u0442' containing potentially short/duplicate tips",
+      "coordinates": [
+        761,
+        38,
+        924,
+        961
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "36",
+      "element": "Block '\u041b\u044e\u0434\u0438 \u0438\u0449\u0443\u0442' showing potentially repeating suggestions",
+      "coordinates": [
+        761,
+        38,
+        924,
+        961
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "45",
+      "element": "Block of multiple similar recipe cards requiring comparison",
+      "coordinates": [
+        289,
+        38,
+        531,
+        961
+      ],
+      "confidence": 0.8
+    },
+    {
+      "id": "55",
+      "element": "Area with high density of clickable recipe cards",
+      "coordinates": [
+        289,
+        38,
+        531,
+        961
+      ],
+      "confidence": 0.7
+    },
+    {
+      "id": "40",
+      "element": "Overloaded '\u041b\u044e\u0434\u0438 \u0438\u0449\u0443\u0442' block",
+      "coordinates": [
+        761,
+        38,
+        924,
+        961
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "3",
+      "element": "Area showing high density of recipe cards with minimal separation",
+      "coordinates": [
+        289,
+        38,
+        531,
+        961
+      ],
+      "confidence": 0.8
+    },
+    {
+      "id": "9",
+      "element": "Large video block with significant visual weight",
+      "coordinates": [
+        154,
+        38,
+        281,
+        961
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "38",
+      "element": "Missing subcategory grouping within recipe list",
+      "coordinates": null,
+      "confidence": 0.9
+    },
+    {
+      "id": "7",
+      "element": "Contrasting green icon in the top advertisement",
+      "coordinates": [
+        51,
+        45,
+        100,
+        232
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "25",
+      "element": "Area within a recipe card showing title and description with insufficient hierarchy",
+      "coordinates": [
+        351,
+        38,
+        400,
+        961
+      ],
+      "confidence": 0.8
+    }
+  ]
+}
