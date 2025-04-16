@@ -7,6 +7,7 @@ import shutil
 import asyncio
 import sys
 import mimetypes
+import telegram
 from telegram import Update, InputFile
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from dotenv import load_dotenv
