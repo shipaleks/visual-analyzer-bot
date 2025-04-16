@@ -6,6 +6,7 @@ import re
 import shutil
 import asyncio
 import sys
+import mimetypes
 from telegram import Update, InputFile
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from dotenv import load_dotenv
@@ -20,6 +21,10 @@ logging.basicConfig(
 )
 logging.getLogger("httpx").setLevel(logging.WARNING) # Уменьшаем шум от библиотеки httpx
 logger = logging.getLogger(__name__)
+
+# --- Define script path relative to bot.py ---
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PIPELINE_SCRIPT_PATH = os.path.join(SCRIPT_DIR, 'run_analysis_pipeline.py')
 
 # --- Обработчики команд ---
 
@@ -36,7 +41,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /help."""
     await update.message.reply_text(
         "Как использовать бота:\n"
-        "1. Отправь мне изображение (скриншот) интерфейса, который нужно проанализировать.\n"
+        "1. Отправь мне изображение (скриншот) интерфейса, который нужно проанализировать (как фото или как файл).\n"
         "2. Я запущу полный пайплайн анализа (GPT-4, Gemini Coordinates, Heatmap, Report).\n"
         "3. В ответ я пришлю PDF-отчет и тепловую карту.\n\n"
         "Пожалуйста, отправляй только одно изображение за раз."
@@ -45,28 +50,49 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- Обработчик изображений ---
 
 async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает полученное изображение, запускает анализ и отправляет результаты."""
+    """Обрабатывает полученное изображение (фото или документ), запускает анализ и отправляет результаты."""
     message = update.message
     chat_id = update.effective_chat.id
-    if not message.photo:
-        await message.reply_text("Пожалуйста, отправь изображение (не файл).")
-        return
+    file_to_get = None
+    file_unique_id = None
+    file_extension = '.png' # Default extension
 
-    await message.reply_text("Изображение получено. Начинаю анализ... Это может занять несколько минут ⏳")
+    photo = message.photo
+    document = message.document
 
-    # Получаем файл изображения наибольшего разрешения
-    try:
-        photo_file = await message.photo[-1].get_file()
-    except Exception as e:
-        logger.error(f"Не удалось получить файл изображения: {e}")
-        await message.reply_text("Произошла ошибка при получении файла изображения. Попробуйте еще раз.")
+    if photo:
+        # Process photo
+        await message.reply_text("Фото получено. Начинаю анализ... Это может занять несколько минут ⏳")
+        try:
+            file_to_get = await message.photo[-1].get_file()
+            file_unique_id = file_to_get.file_unique_id
+        except Exception as e:
+            logger.error(f"Не удалось получить файл фото: {e}")
+            await message.reply_text("Произошла ошибка при получении файла фото. Попробуйте еще раз.")
+            return
+    elif document and document.mime_type and document.mime_type.startswith('image/'):
+        # Process document image
+        await message.reply_text("Изображение (как документ) получено. Начинаю анализ... Это может занять несколько минут ⏳")
+        try:
+            file_to_get = await document.get_file()
+            file_unique_id = file_to_get.file_unique_id
+            file_extension = mimetypes.guess_extension(document.mime_type) or '.png'
+        except Exception as e:
+            logger.error(f"Не удалось получить файл документа: {e}")
+            await message.reply_text("Произошла ошибка при получении файла документа. Попробуйте еще раз.")
+            return
+    else:
+        # Neither photo nor image document
+        await message.reply_text("Пожалуйста, отправь изображение (как фото или как файл изображения).")
         return
 
     # Создаем временную директорию для изображения
     with tempfile.TemporaryDirectory() as temp_dir:
-        image_path = os.path.join(temp_dir, f"input_image_{photo_file.file_unique_id}.png")
+        # Use unique ID and determined extension for filename
+        image_filename = f"input_image_{file_unique_id}{file_extension}"
+        image_path = os.path.join(temp_dir, image_filename)
         try:
-            await photo_file.download_to_drive(image_path)
+            await file_to_get.download_to_drive(image_path)
             logger.info(f"Изображение сохранено во временный файл: {image_path}")
         except Exception as e:
             logger.error(f"Не удалось скачать изображение: {e}")
@@ -75,45 +101,57 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Запускаем пайплайн анализа
         try:
-            logger.info(f"Запуск run_analysis_pipeline.py для {image_path}")
+            # Check if pipeline script exists
+            if not os.path.exists(PIPELINE_SCRIPT_PATH):
+                logger.error(f"Скрипт анализа не найден по пути: {PIPELINE_SCRIPT_PATH}")
+                await message.reply_text("Критическая ошибка: не найден скрипт анализа на сервере.")
+                return
+
+            logger.info(f"Запуск {PIPELINE_SCRIPT_PATH} для {image_path}")
             process = await asyncio.create_subprocess_exec(
                 sys.executable, # Используем тот же python, что и для бота
-                'run_analysis_pipeline.py',
+                PIPELINE_SCRIPT_PATH, # Use the absolute path
                 image_path,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                stderr=subprocess.PIPE,
+                # Set working directory to the script's directory? Maybe not needed if paths inside pipeline are ok.
+                # cwd=SCRIPT_DIR
             )
             stdout, stderr = await process.communicate()
             stdout_str = stdout.decode('utf-8', errors='ignore')
             stderr_str = stderr.decode('utf-8', errors='ignore')
 
-            logger.info(f"run_analysis_pipeline.py завершился с кодом {process.returncode}")
+            logger.info(f"{PIPELINE_SCRIPT_PATH} завершился с кодом {process.returncode}")
             if process.returncode != 0:
-                logger.error(f"Ошибка выполнения run_analysis_pipeline.py:\nstdout:\n{stdout_str}\nstderr:\n{stderr_str}")
-                # Отправляем пользователю сообщение об ошибке, включая stderr, если он не пустой
+                logger.error(f"Ошибка выполнения {PIPELINE_SCRIPT_PATH}:\nstdout:\n{stdout_str}\nstderr:\n{stderr_str}")
                 error_message = "Произошла ошибка во время анализа."
                 if stderr_str:
-                    # Показываем только последние ~500 символов ошибки, чтобы не спамить
-                    # Используем replace для экранирования Markdown V2 спецсимволов
-                    escaped_stderr = re.sub(r'([_*\[\]()~`>#+\-=|{}.!])\'', r'\\\1\'', stderr_str[-500:])
-                    error_message += f"\n\nДетали ошибки:\n```\n...{escaped_stderr}\n```"
+                    # Corrected MarkdownV2 escaping
+                    # Escapes _ * [ ] ( ) ~ ` > # + - = | { } . !
+                    try:
+                        escaped_stderr = re.sub(r'([_*\\[\\]()~`>#+\\-=|{}.!])', r'\\\\\\1', stderr_str[-500:]) # Fixed regex pattern
+                        error_message += f"\n\nДетали ошибки:\n```\n...{escaped_stderr}\n```"
+                        await message.reply_text(error_message, parse_mode='MarkdownV2')
+                    except Exception as escape_err:
+                        logger.error(f"Failed to send MarkdownV2 error message: {escape_err}. Sending plain text.")
+                        error_message += f"\n\nДетали ошибки (raw):\n...{stderr_str[-500:]}"
+                        await message.reply_text(error_message) # Fallback to plain text
 
-                await message.reply_text(error_message, parse_mode='MarkdownV2')
+                else:
+                    await message.reply_text(error_message) # Send generic if no stderr
                 return
 
-            logger.info(f"stdout run_analysis_pipeline.py:\n{stdout_str}")
+            logger.info(f"stdout {PIPELINE_SCRIPT_PATH}:\n{stdout_str}")
             if stderr_str: # Логируем stderr даже при успешном выполнении
-                logger.warning(f"stderr run_analysis_pipeline.py (при коде 0):\n{stderr_str}")
+                logger.warning(f"stderr {PIPELINE_SCRIPT_PATH} (при коде 0):\n{stderr_str}")
 
             # Извлекаем пути к результатам из stdout
             pdf_path_match = re.search(r"✅ PDF Отчет: (.*\.pdf)", stdout_str)
             heatmap_path_match = re.search(r"✅ Тепловая карта: (.*\.png)", stdout_str)
-            # Обновленный регекс для директории, учитывающий ./ если скрипт запущен из корня
-            output_dir_match = re.search(r"Результаты будут сохранены в: (\\./)?(analysis_outputs/run_\\d{8}_\\d{6})", stdout_str)
+            output_dir_match = re.search(r"Результаты будут сохранены в: (\\\\./)?(analysis_outputs/run_\\d{8}_\\d{6})", stdout_str)
 
             pdf_path = pdf_path_match.group(1).strip() if pdf_path_match else None
             heatmap_path = heatmap_path_match.group(1).strip() if heatmap_path_match else None
-            # Берем вторую группу захвата, чтобы исключить опциональный "./"
             output_dir = output_dir_match.group(2).strip() if output_dir_match else None # Для очистки
 
             # Отправляем результаты
@@ -122,34 +160,34 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             results_sent = False
             if pdf_path and os.path.exists(pdf_path):
                 try:
-                    # Отправляем с InputFile для автоматической обработки пути
                     await context.bot.send_document(chat_id=chat_id, document=InputFile(pdf_path), filename=os.path.basename(pdf_path))
                     logger.info(f"Отправлен PDF: {pdf_path}")
                     results_sent = True
                 except Exception as e:
                     logger.error(f"Не удалось отправить PDF {pdf_path}: {e}")
-                    await message.reply_text(f"Не удалось отправить PDF отчет: {e}")
+                    await message.reply_text(f"Не удалось отправить PDF отчет.") # Simplified error
             else:
                 logger.warning(f"PDF файл не найден ({os.path.exists(pdf_path) if pdf_path else 'N/A'}) или путь не извлечен: {pdf_path}")
 
             if heatmap_path and os.path.exists(heatmap_path):
                 try:
-                    # Отправляем с InputFile
                     await context.bot.send_photo(chat_id=chat_id, photo=InputFile(heatmap_path), caption="Тепловая карта проблемных зон")
                     logger.info(f"Отправлена тепловая карта: {heatmap_path}")
                     results_sent = True
                 except Exception as e:
                     logger.error(f"Не удалось отправить тепловую карту {heatmap_path}: {e}")
-                    await message.reply_text(f"Не удалось отправить тепловую карту: {e}")
+                    await message.reply_text(f"Не удалось отправить тепловую карту.") # Simplified error
             else:
                 logger.warning(f"Файл тепловой карты не найден ({os.path.exists(heatmap_path) if heatmap_path else 'N/A'}) или путь не извлечен: {heatmap_path}")
 
             if not results_sent:
                 await message.reply_text("Не удалось найти или отправить файлы результатов после анализа.")
 
-            # Очистка: удаляем папку с результатами, если она была создана пайплайном
-            if output_dir and os.path.exists(output_dir) and output_dir.startswith("analysis_outputs/"): # Доп. проверка безопасности
+            # Очистка: удаляем папку с результатами
+            if output_dir and os.path.exists(output_dir) and output_dir.startswith("analysis_outputs/"):
                 try:
+                    # Use absolute path for safety? Though relative should work if bot CWD is /app
+                    # output_dir_abs = os.path.join(SCRIPT_DIR, output_dir) # If needed
                     shutil.rmtree(output_dir)
                     logger.info(f"Удалена директория с результатами: {output_dir}")
                 except Exception as e:
@@ -158,14 +196,26 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.warning(f"Директория для удаления не найдена или небезопасна: {output_dir}")
 
         except Exception as e:
-            logger.exception("Неожиданная ошибка в handle_image") # Логируем traceback
+            logger.exception("Неожиданная ошибка в handle_image")
             await message.reply_text("Произошла неожиданная ошибка во время обработки вашего запроса.")
 
 # --- Обработчик ошибок ---
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     """Логирует ошибки, вызванные обновлениями."""
-    logger.error(f"Update {update} caused error {context.error}")
+    # Log the error before reacting to it
+    logger.error(f"Update {update} caused error {context.error}", exc_info=context.error)
+
+    # Handle potential MarkdownV2 issues in error reporting itself
+    if isinstance(context.error, telegram.error.BadRequest) and "Can't parse entities" in str(context.error):
+        logger.warning("BadRequest when sending error message, potentially MarkdownV2 issue.")
+        # Optionally send a generic error to the user if the detailed one failed
+        if update and hasattr(update, 'effective_message'):
+            try:
+                # Avoid sending another MarkdownV2 message here if that's the source of the error
+                await update.effective_message.reply_text("Произошла внутренняя ошибка при обработке предыдущей ошибки.")
+            except Exception as inner_e:
+                logger.error(f"Failed to send fallback error message: {inner_e}")
 
 # --- Основная функция ---
 
@@ -181,7 +231,8 @@ def main():
     # Регистрация обработчиков
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(MessageHandler(filters.PHOTO, handle_image))
+    # Updated handler to accept photos OR image documents
+    application.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_image))
 
     # Регистрация обработчика ошибок
     application.add_error_handler(error_handler)
