@@ -126,20 +126,14 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if process.returncode != 0:
                 logger.error(f"Ошибка выполнения {PIPELINE_SCRIPT_PATH}:\nstdout:\n{stdout_str}\nstderr:\n{stderr_str}")
                 error_message = "Произошла ошибка во время анализа."
+                # Send stderr as plain text
                 if stderr_str:
-                    # Corrected MarkdownV2 escaping
-                    # Escapes _ * [ ] ( ) ~ ` > # + - = | { } . !
-                    try:
-                        escaped_stderr = re.sub(r'([_*\\[\\]()~`>#+\\-=|{}.!])', r'\\\\\\1', stderr_str[-500:]) # Fixed regex pattern
-                        error_message += f"\n\nДетали ошибки:\n```\n...{escaped_stderr}\n```"
-                        await message.reply_text(error_message, parse_mode='MarkdownV2')
-                    except Exception as escape_err:
-                        logger.error(f"Failed to send MarkdownV2 error message: {escape_err}. Sending plain text.")
-                        error_message += f"\n\nДетали ошибки (raw):\n...{stderr_str[-500:]}"
-                        await message.reply_text(error_message) # Fallback to plain text
-
-                else:
-                    await message.reply_text(error_message) # Send generic if no stderr
+                    error_message += f"\n\nДетали ошибки (raw):\n```\n...{stderr_str[-700:]}```"
+                
+                try:
+                    await message.reply_text(error_message) # Send plain text error
+                except Exception as send_err:
+                     logger.error(f"Failed to send plain text error message: {send_err}")
                 return
 
             logger.info(f"stdout {PIPELINE_SCRIPT_PATH}:\n{stdout_str}")
@@ -204,19 +198,8 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     """Логирует ошибки, вызванные обновлениями."""
-    # Log the error before reacting to it
     logger.error(f"Update {update} caused error {context.error}", exc_info=context.error)
-
-    # Handle potential MarkdownV2 issues in error reporting itself
-    if isinstance(context.error, telegram.error.BadRequest) and "Can't parse entities" in str(context.error):
-        logger.warning("BadRequest when sending error message, potentially MarkdownV2 issue.")
-        # Optionally send a generic error to the user if the detailed one failed
-        if update and hasattr(update, 'effective_message'):
-            try:
-                # Avoid sending another MarkdownV2 message here if that's the source of the error
-                await update.effective_message.reply_text("Произошла внутренняя ошибка при обработке предыдущей ошибки.")
-            except Exception as inner_e:
-                logger.error(f"Failed to send fallback error message: {inner_e}")
+    # No need to check for Markdown error here anymore, as we send plain text
 
 # --- Основная функция ---
 
