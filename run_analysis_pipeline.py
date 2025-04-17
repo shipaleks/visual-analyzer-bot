@@ -28,7 +28,7 @@ if not os.path.exists(GENERATE_REPORT_SCRIPT):
 
 # Default paths for prompts (relative to SCRIPT_DIR)
 # Make sure these paths are correct within your project structure
-DEFAULT_GPT_PROMPT = os.path.join(SCRIPT_DIR, 'gpt_full_prompt.txt') # Check if this exists or is in tests/
+DEFAULT_GPT_PROMPT = os.path.join(SCRIPT_DIR, 'tests', 'gpt_full_prompt.txt') # Corrected path to tests/
 DEFAULT_INTERPRETATION_PROMPT = os.path.join(SCRIPT_DIR, 'gemini_interpretation_prompt.md')
 DEFAULT_RECOMMENDATIONS_PROMPT = os.path.join(SCRIPT_DIR, 'gemini_recommendations_only_prompt.md')
 DEFAULT_COORDS_PROMPT = os.path.join(SCRIPT_DIR, 'gemini_simple_prompt.md') # Assuming this is the coords prompt
