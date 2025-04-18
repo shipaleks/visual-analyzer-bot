@@ -118,14 +118,15 @@ def run_pipeline(image_path):
                  print(f"!!! Ошибка: Файл GPT промпта не найден: {DEFAULT_GPT_PROMPT} !!!")
                  raise FileNotFoundError(f"Prompt file not found: {DEFAULT_GPT_PROMPT}")
             
-            from api_test import run_full_gpt_analysis # Import needed function
+            from api_test import run_gpt_analysis # Corrected function name
 
-            success, gpt_result_data = run_full_gpt_analysis(
+            success, gpt_result_data = run_gpt_analysis( # Corrected function call
                 image_path=image_path,
                 output_json_path=gpt_analysis_output,
                 interface_type=interface_type,
                 user_scenario=user_scenario,
-                gpt_prompt_path=DEFAULT_GPT_PROMPT
+                # Pass the correct gpt_prompt_path here if run_gpt_analysis needs it
+                # gpt_prompt_path=DEFAULT_GPT_PROMPT # This might be handled inside run_gpt_analysis now
             )
             if not success:
                 print("!!! Ошибка выполнения GPT-4.1 Анализа через api_test.py !!!")
@@ -163,13 +164,16 @@ def run_pipeline(image_path):
                      print(f"!!! Ошибка: Файл Gemini координат промпта не найден: {DEFAULT_COORDS_PROMPT} !!!")
                      raise FileNotFoundError(f"Coords prompt file not found: {DEFAULT_COORDS_PROMPT}")
                      
-                from api_test import run_gemini_coordinates_only # Import needed function
+                from api_test import run_gemini_coordinates # Corrected function name
                 
-                success, coords_result_data = run_gemini_coordinates_only(
+                # Need to pass gpt_analysis_output (json path) or gpt_result_data (loaded dict)? 
+                # Let's assume it takes the path based on previous structure
+                success, coords_result_data = run_gemini_coordinates( # Corrected function call
                     image_path=image_path,
+                    gpt_analysis_json_path=gpt_analysis_output, # Assuming it needs the path to GPT results
                     output_raw_json_path=gemini_coords_raw_output,
                     output_parsed_json_path=gemini_coords_parsed_output,
-                    prompt_path=DEFAULT_COORDS_PROMPT
+                    # prompt_path=DEFAULT_COORDS_PROMPT # Maybe handled internally?
                 )
                 if not success:
                     print("!!! Ошибка выполнения Gemini Координат через api_test.py !!!")
@@ -204,11 +208,13 @@ def run_pipeline(image_path):
                 if tests_dir not in sys.path:
                      sys.path.insert(0, tests_dir)
                      
-                from api_test import run_heatmap_generation # Import needed function
+                from api_test import generate_heatmap # Corrected function name
 
-                success = run_heatmap_generation(
+                # Assuming generate_heatmap takes coords_path, not loaded data
+                success = generate_heatmap( # Corrected function call
                     image_path=image_path,
                     coordinates_json_path=gemini_coords_parsed_output,
+                    gpt_analysis_json_path=gpt_analysis_output, # Check if needed by generate_heatmap
                     output_heatmap_path=heatmap_output
                 )
                 if not success:
