@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Redeploy trigger: bump version to force Railway deploy
 """
 Main pipeline script to run the full visual interface analysis.
 """
