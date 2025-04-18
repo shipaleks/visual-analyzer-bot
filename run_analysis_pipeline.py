@@ -171,14 +171,13 @@ def run_pipeline(image_path):
                     print("!!! Ошибка: Данные GPT анализа отсутствуют, невозможно запустить Gemini Координаты !!!")
                     raise ValueError("Missing GPT analysis data for Gemini Coordinates")
                     
-                success, coords_result_data = run_gemini_coordinates( # Corrected function call
+                coords_result_data = run_gemini_coordinates(
                     image_path=image_path,
-                    gpt_result_data=gpt_result_data, # Pass the loaded data dictionary
+                    gpt_result_data=gpt_result_data,
                     output_raw_json_path=gemini_coords_raw_output,
                     output_parsed_json_path=gemini_coords_parsed_output
-                    # prompt_path is handled internally by run_gemini_coordinates
                 )
-                if not success:
+                if not coords_result_data:
                     print("!!! Ошибка выполнения Gemini Координат через api_test.py !!!")
                     pipeline_success = False # Coordinates are likely critical
                     pipeline_error_details += "Gemini Coordinates failed.\n"
