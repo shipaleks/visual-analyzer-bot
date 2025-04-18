@@ -92,4 +92,6 @@ User → Telegram Bot → GPT-4.1 → Parser → Gemini 2.5 → Heatmap Generato
 4. Wait for processing (typically 1-2 minutes)
 5. Receive analysis results with heatmap visualization
 
-For detailed implementation status, see [implementation_plan.md](implementation_plan.md). 
+For detailed implementation status, see [implementation_plan.md](implementation_plan.md).
+
+<!-- redeploy trigger: cosmetic bump --> 
