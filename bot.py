@@ -175,6 +175,30 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 logger.warning(f"Файл тепловой карты не найден ({os.path.exists(heatmap_path) if heatmap_path else 'N/A'}) или путь не извлечен: {heatmap_path}")
 
+            # Send interpretation JSON if available
+            interp_match = re.search(r"✅ Файл интерпретации: (.*\\.json)", stdout_str)
+            interp_path = interp_match.group(1).strip() if interp_match else None
+            if interp_path and os.path.exists(interp_path):
+                try:
+                    await context.bot.send_document(chat_id=chat_id, document=InputFile(interp_path), filename=os.path.basename(interp_path))
+                    logger.info(f"Отправлен файл интерпретации: {interp_path}")
+                    results_sent = True
+                except Exception as e:
+                    logger.error(f"Не удалось отправить файл интерпретации {interp_path}: {e}")
+                    await message.reply_text("Не удалось отправить файл интерпретации.")
+
+            # Send recommendations JSON if available
+            rec_match = re.search(r"✅ Файл рекомендаций: (.*\\.json)", stdout_str)
+            rec_path = rec_match.group(1).strip() if rec_match else None
+            if rec_path and os.path.exists(rec_path):
+                try:
+                    await context.bot.send_document(chat_id=chat_id, document=InputFile(rec_path), filename=os.path.basename(rec_path))
+                    logger.info(f"Отправлен файл рекомендаций: {rec_path}")
+                    results_sent = True
+                except Exception as e:
+                    logger.error(f"Не удалось отправить файл рекомендаций {rec_path}: {e}")
+                    await message.reply_text("Не удалось отправить файл рекомендаций.")
+
             if not results_sent:
                 await message.reply_text("Не удалось найти или отправить файлы результатов после анализа.")
 
