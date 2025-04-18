@@ -59,7 +59,10 @@ def encode_image(image_path):
 
 # --- Refactored GPT Analysis Function ---
 def run_gpt_analysis(image_path, interface_type, user_scenario, output_json_path):
-    """Runs GPT-4.1 UI analysis and saves the result to a JSON file."""
+    """Runs GPT-4.1 UI analysis and saves the result to a JSON file.
+    Returns:
+        tuple: (bool, dict | None): (success_status, analysis_data) or (False, None) on error.
+    """
     print(f"--- Запуск GPT-4.1 Анализа для: {image_path} ---")
     print(f"    Тип интерфейса: {interface_type}")
     print(f"    Сценарий: {user_scenario}")
@@ -191,7 +194,7 @@ def run_gpt_analysis(image_path, interface_type, user_scenario, output_json_path
     try:
         base64_image = encode_image(image_path)
         
-        # Load system prompt from file (ensure path is correct relative to this script)
+        # Load system prompt from file
         prompt_file_path = os.path.join(os.path.dirname(__file__), "gpt_full_prompt.txt")
         try:
             with open(prompt_file_path, "r", encoding="utf-8") as prompt_file:
@@ -199,8 +202,7 @@ def run_gpt_analysis(image_path, interface_type, user_scenario, output_json_path
                 print(f"    Загружен GPT промпт из: {prompt_file_path}")
         except Exception as e:
             print(f"    !!! Ошибка загрузки GPT промпта ({prompt_file_path}): {e} !!!")
-            # Consider raising error or using a minimal fallback
-            return None # Fail if prompt is essential
+            return False, None # Return error status
 
         # Construct user message
         user_message_text = f"""
@@ -234,40 +236,36 @@ def run_gpt_analysis(image_path, interface_type, user_scenario, output_json_path
             except json.JSONDecodeError as e:
                 print(f"    !!! Ошибка декодирования JSON из GPT ответа: {e} !!!")
                 print(f"    Raw arguments: {message.tool_calls[0].function.arguments}")
-                return None
+                return False, None # Return error status
         else:
             print("    !!! Ошибка: GPT не вернул ожидаемый tool_call 'record_ui_analysis'. !!!")
-            # print(f"Received response: {response}") # Avoid printing large response object unless debugging
-            return None
+            return False, None # Return error status
 
         if analysis_result is None:
-            return None # Error already printed
+             # Error already printed in parsing/checking steps
+             return False, None # Return error status
 
-        # Add timestamp if missing (optional, schema requires it)
+        # Add timestamp if missing
         if "metaInfo" in analysis_result and "analysisTimestamp" not in analysis_result["metaInfo"]:
              analysis_result["metaInfo"]["analysisTimestamp"] = datetime.datetime.now().isoformat()
 
         # Save result to specified file
         try:
-            # Ensure output directory exists
-            os.makedirs(os.path.dirname(output_json_path), exist_ok=True)
-            with open(output_json_path, "w", encoding="utf-8") as f:
+            with open(output_json_path, 'w', encoding='utf-8') as f:
                 json.dump(analysis_result, f, indent=2, ensure_ascii=False)
             print(f"    Результат GPT анализа сохранен в: {output_json_path}")
+            return True, analysis_result # Return success and the data
         except Exception as e:
-            print(f"    !!! Ошибка сохранения GPT JSON в {output_json_path}: {e} !!!")
-            # Optionally return None here if saving is critical
-
-        print(f"--- Успешно: GPT-4.1 Анализ ---")
-        return analysis_result
+            print(f"    !!! Ошибка сохранения GPT результата в {output_json_path}: {e} !!!")
+            return False, None # Return error status
 
     except FileNotFoundError as e:
-        print(f"    !!! Ошибка: Файл не найден (возможно, изображение или промпт): {e} !!!")
-        return None
+        print(f"    !!! Ошибка: Файл не найден (вероятно, изображение): {e} !!!")
+        return False, None
     except Exception as e:
-        print(f"    !!! Неожиданная ошибка в run_gpt_analysis: {e} !!!")
-        traceback.print_exc() # Print stack trace for unexpected errors
-        return None
+        print(f"    !!! Неожиданная ошибка в GPT анализе: {e} !!!")
+        traceback.print_exc()
+        return False, None
 
 # --- Refactored Gemini Coordinates Function ---
 def run_gemini_coordinates(image_path, gpt_result_data, output_raw_json_path, output_parsed_json_path):
