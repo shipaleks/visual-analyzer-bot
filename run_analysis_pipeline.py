@@ -179,9 +179,8 @@ def run_pipeline(image_path):
                     output_parsed_json_path=gemini_coords_parsed_output
                 )
                 if not coords_result_data:
-                    print("!!! Ошибка выполнения Gemini Координат через api_test.py !!!")
-                    pipeline_success = False # Coordinates are likely critical
-                    pipeline_error_details += "Gemini Coordinates failed.\n"
+                    print("!!! Предупреждение: Gemini Координаты не были получены; продолжаю без координат и тепловой карты !!!")
+                    pipeline_error_details += "Gemini Coordinates failed; continuing without coordinates.\n"
                 else:
                     print(f"    Raw Gemini ответ сохранен в: {gemini_coords_raw_output}")
                     print(f"    Распарсенный Gemini ответ сохранен в: {gemini_coords_parsed_output}")
