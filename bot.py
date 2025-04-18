@@ -199,6 +199,39 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     logger.error(f"Не удалось отправить файл рекомендаций {rec_path}: {e}")
                     await message.reply_text("Не удалось отправить файл рекомендаций.")
 
+            # Fallback: If PDF wasn't sent, try sending .tex report if available
+            if (not pdf_path or not os.path.exists(pdf_path)):
+                tex_match = re.search(r"✅ LaTeX Отчет.*: (.*\\.tex)", stdout_str)
+                tex_path = tex_match.group(1).strip() if tex_match else None
+                if tex_path and os.path.exists(tex_path):
+                    try:
+                        await context.bot.send_document(chat_id=chat_id, document=InputFile(tex_path), filename=os.path.basename(tex_path))
+                        logger.info(f"Отправлен LaTeX отчет (.tex): {tex_path}")
+                        results_sent = True
+                    except Exception as e:
+                        logger.error(f"Не удалось отправить LaTeX отчет {tex_path}: {e}")
+                        await message.reply_text("Не удалось отправить LaTeX отчет (.tex).")
+
+            # Send interpretation text if available
+            if interp_path and os.path.exists(interp_path):
+                try:
+                    with open(interp_path, 'r', encoding='utf-8') as f:
+                        interp_text = f.read()
+                    await message.reply_text(f"📄 Интерпретация:\n```json\n{interp_text}\n```", parse_mode="Markdown")
+                    results_sent = True
+                except Exception as e:
+                    logger.error(f"Не удалось отправить текст интерпретации {interp_path}: {e}")
+
+            # Send recommendations text if available
+            if rec_path and os.path.exists(rec_path):
+                try:
+                    with open(rec_path, 'r', encoding='utf-8') as f:
+                        rec_text = f.read()
+                    await message.reply_text(f"💡 Рекомендации:\n```json\n{rec_text}\n```", parse_mode="Markdown")
+                    results_sent = True
+                except Exception as e:
+                    logger.error(f"Не удалось отправить текст рекомендаций {rec_path}: {e}")
+
             if not results_sent:
                 await message.reply_text("Не удалось найти или отправить файлы результатов после анализа.")
 
