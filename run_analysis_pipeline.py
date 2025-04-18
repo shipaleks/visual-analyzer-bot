@@ -166,14 +166,17 @@ def run_pipeline(image_path):
                      
                 from api_test import run_gemini_coordinates # Corrected function name
                 
-                # Need to pass gpt_analysis_output (json path) or gpt_result_data (loaded dict)? 
-                # Let's assume it takes the path based on previous structure
+                # Check if gpt_result_data exists from previous step
+                if 'gpt_result_data' not in locals() or gpt_result_data is None:
+                    print("!!! Ошибка: Данные GPT анализа отсутствуют, невозможно запустить Gemini Координаты !!!")
+                    raise ValueError("Missing GPT analysis data for Gemini Coordinates")
+                    
                 success, coords_result_data = run_gemini_coordinates( # Corrected function call
                     image_path=image_path,
-                    gpt_analysis_json_path=gpt_analysis_output, # Assuming it needs the path to GPT results
+                    gpt_result_data=gpt_result_data, # Pass the loaded data dictionary
                     output_raw_json_path=gemini_coords_raw_output,
-                    output_parsed_json_path=gemini_coords_parsed_output,
-                    # prompt_path=DEFAULT_COORDS_PROMPT # Maybe handled internally?
+                    output_parsed_json_path=gemini_coords_parsed_output
+                    # prompt_path is handled internally by run_gemini_coordinates
                 )
                 if not success:
                     print("!!! Ошибка выполнения Gemini Координат через api_test.py !!!")
@@ -210,11 +213,20 @@ def run_pipeline(image_path):
                      
                 from api_test import generate_heatmap # Corrected function name
 
-                # Assuming generate_heatmap takes coords_path, not loaded data
+                # Check if needed data exists
+                if 'gpt_result_data' not in locals() or gpt_result_data is None:
+                    print("!!! Ошибка: Данные GPT анализа отсутствуют, невозможно запустить Генерацию Тепловой Карты !!!")
+                    raise ValueError("Missing GPT analysis data for Heatmap Generation")
+                if 'coords_result_data' not in locals() or coords_result_data is None:
+                     print("!!! Ошибка: Данные координат отсутствуют, невозможно запустить Генерацию Тепловой Карты !!!")
+                     raise ValueError("Missing Coordinates data for Heatmap Generation")
+
+                # Pass the loaded dictionary for gpt_result_data
+                # Pass the dictionary returned by run_gemini_coordinates for coordinates_data
                 success = generate_heatmap( # Corrected function call
                     image_path=image_path,
-                    coordinates_json_path=gemini_coords_parsed_output,
-                    gpt_analysis_json_path=gpt_analysis_output, # Check if needed by generate_heatmap
+                    coordinates_data=coords_result_data, # Pass the loaded coords dictionary
+                    gpt_result_data=gpt_result_data, # Pass the loaded gpt dictionary
                     output_heatmap_path=heatmap_output
                 )
                 if not success:
