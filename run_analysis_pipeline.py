@@ -318,6 +318,7 @@ def run_pipeline(image_path):
     # --- Final Summary ---
     print("\n============================== ИТОГОВЫЕ РЕЗУЛЬТАТЫ ==============================\n")
     # Check existence of final outputs
+    final_tex_exists = os.path.exists(f"{report_base_output}.tex")
     final_pdf_exists = os.path.exists(report_pdf_output)
     final_heatmap_exists = os.path.exists(heatmap_output)
     final_interpretation_exists = os.path.exists(interpretation_output)
@@ -325,8 +326,11 @@ def run_pipeline(image_path):
 
     if final_pdf_exists:
         print(f"✅ PDF Отчет: {report_pdf_output}")
+    elif final_tex_exists:
+        print(f"✅ LaTeX Отчет (.tex): {report_base_output}.tex")
+        print("⚠️ PDF генерация пропущена (pdflatex не доступен). Вы можете скомпилировать .tex вручную.")
     else:
-        print("❌ Отчет (PDF/LaTeX) не был сгенерирован.")
+        print("❌ Отчет не был сгенерирован.")
 
     if final_heatmap_exists:
         print(f"✅ Тепловая карта: {heatmap_output}")
@@ -351,8 +355,8 @@ def run_pipeline(image_path):
 
     print("\n============================== ЗАВЕРШЕНИЕ ПАЙПЛАЙНА ==============================\n")
 
-    # Exit with error code if pipeline failed or final report PDF is missing
-    if not pipeline_success or not final_pdf_exists:
+    # Exit with error if pipeline failed or neither PDF nor TEX exists
+    if not pipeline_success or (not final_pdf_exists and not final_tex_exists):
         sys.exit(1)
     else:
         sys.exit(0)
