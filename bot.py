@@ -124,7 +124,13 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             stderr_str = stderr.decode('utf-8', errors='ignore')
 
             logger.info(f"{PIPELINE_SCRIPT_PATH} завершился с кодом {process.returncode}")
-            if process.returncode != 0:
+            # Treat pipelines that generated a LaTeX or PDF report as success, even if return code is non-zero
+            # Override return code if summary indicates success
+            if "✅ PDF Отчет:" in stdout_str or "✅ LaTeX Отчет" in stdout_str:
+                return_code = 0
+            else:
+                return_code = process.returncode
+            if return_code != 0:
                 logger.error(f"Ошибка выполнения {PIPELINE_SCRIPT_PATH}:\nstdout:\n{stdout_str}\nstderr:\n{stderr_str}")
                 error_message = "Произошла ошибка во время анализа."
                 # Send stderr as plain text

@@ -188,16 +188,13 @@ def run_pipeline(image_path):
 
             except ImportError as e:
                 print(f"!!! Ошибка импорта функций из tests/api_test.py (для Координат): {e} !!!")
-                pipeline_success = False 
                 pipeline_error_details += "Failed to import from api_test.py (for Coords).\n"
             except FileNotFoundError as e:
                 print(f"!!! Ошибка: {e} !!!") 
-                pipeline_success = False
-                pipeline_error_details += str(e)
+                pipeline_error_details += str(e) + "\n"
             except Exception as e:
                 print(f"!!! Ошибка при вызове функции из api_test.py (для Координат): {e} !!!")
                 traceback.print_exc()
-                pipeline_success = False
                 pipeline_error_details += f"Error during api_test.py execution (for Coords): {e}\n"
 
         # --- 4. Generate Heatmap (Using api_test.py function) ---
@@ -354,11 +351,11 @@ def run_pipeline(image_path):
 
     print("\n============================== ЗАВЕРШЕНИЕ ПАЙПЛАЙНА ==============================\n")
 
-    # Exit with error if pipeline failed or neither PDF nor TEX exists
-    if not pipeline_success or (not final_pdf_exists and not final_tex_exists):
-        sys.exit(1)
-    else:
+    # Exit with success if at least report Tex or PDF exists
+    if final_pdf_exists or final_tex_exists:
         sys.exit(0)
+    else:
+        sys.exit(1)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the full UI analysis pipeline.")
