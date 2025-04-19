@@ -94,4 +94,4 @@ User → Telegram Bot → GPT-4.1 → Parser → Gemini 2.5 → Heatmap Generato
 
 For detailed implementation status, see [implementation_plan.md](implementation_plan.md).
 
-<!-- redeploy trigger: v3 --> 
+<!-- redeploy trigger: v4 --> 
