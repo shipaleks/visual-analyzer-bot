@@ -11,9 +11,10 @@ The bot works through the following process:
 4. Bot extracts the issues and sends them to Gemini 2.5 to get coordinate data
 5. Bot generates a heatmap overlay highlighting the problem areas
 6. Bot returns to the user:
-   - Original screenshot with heatmap overlay
-   - Interface evaluation score
-   - Detailed description of identified issues
+   - PDF report with comprehensive analysis (embedded heatmap, scores, details)
+   - Heatmap overlay image
+   - Formatted interpretation messages
+   - Formatted strategic recommendations messages
 
 ## Architecture
 
