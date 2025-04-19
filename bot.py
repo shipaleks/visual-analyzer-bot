@@ -202,6 +202,7 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 heatmap_size_mb = os.path.getsize(heatmap_path) / (1024 * 1024) if os.path.exists(heatmap_path) else 0
                 logger.info(f"Heatmap file size: {heatmap_size_mb:.2f} MB")
                 if os.path.exists(heatmap_path):
+                    # Send as document to avoid Image_process_failed
                     try:
                         logger.info(f"Attempting to send Heatmap as document: {heatmap_path}")
                         await context.bot.send_document(chat_id=chat_id, document=InputFile(heatmap_path), filename=os.path.basename(heatmap_path), caption="Тепловая карта проблемных зон (файл)")
@@ -217,26 +218,6 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     logger.warning(f"Heatmap file path found in stdout, but file does not exist at: {heatmap_path}")
             else:
                 logger.info("No Heatmap path found in stdout.")
-
-            # --- Sending Interpretation JSON file --- 
-            if interp_path:
-                logger.info(f"Checking existence of Interpretation JSON: {interp_path}")
-                if os.path.exists(interp_path):
-                    try:
-                        logger.info(f"Attempting to send Interpretation JSON file: {interp_path}")
-                        await context.bot.send_document(chat_id=chat_id, document=InputFile(interp_path), filename=os.path.basename(interp_path))
-                        logger.info(f"Отправлен файл интерпретации: {interp_path}")
-                        results_sent = True
-                    except Exception as e:
-                        logger.error(f"Не удалось отправить файл интерпретации {interp_path}: {e}")
-                        try:
-                            await message.reply_text("Не удалось отправить файл интерпретации.")
-                        except Exception as reply_e:
-                             logger.error(f"Failed to send error reply for Interpretation JSON: {reply_e}")
-                else:
-                    logger.warning(f"Interpretation JSON path found in stdout, but file does not exist at: {interp_path}")
-            else:
-                logger.info("No Interpretation JSON path found in stdout.")
 
             # --- Formatting and Sending Recommendations ---
             if rec_path and os.path.exists(rec_path):
@@ -262,6 +243,12 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     results_sent = True
                 except Exception as e:
                     logger.error(f"Error formatting/sending recommendations: {e}")
+                    # Optional: Send raw JSON file as fallback on formatting error
+                    try:
+                        logger.info(f"Attempting to send raw recommendations JSON as fallback due to formatting error.")
+                        await context.bot.send_document(chat_id=chat_id, document=InputFile(rec_path), filename=os.path.basename(rec_path))
+                    except Exception as fallback_e:
+                        logger.error(f"Failed to send raw recommendations JSON fallback: {fallback_e}")
             else:
                 logger.warning(f"Recommendations JSON not found or unreadable: {rec_path}")
 
@@ -270,24 +257,48 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     logger.info(f"Parsing and sending formatted interpretation from {interp_path}")
                     with open(interp_path, 'r', encoding='utf-8') as f:
-                        interp_data = json.load(f)
+                        interp_data = json.load(f).get("strategicInterpretation", {}) # Get the nested dict
+                    # Corrected keys based on logs
                     interp_map = {
-                        'attentionArchitecture': '🔎 Архитектура внимания',
+                        'cognitiveEcosystem': '🧠 Когнитивная экосистема',
                         'businessUserTension': '⚖️ Бизнес-напряжение',
-                        'expectedImpact': '🚀 Ожидаемый эффект',
-                        'crossDomainExample': '🌍 Кросс-доменный пример',
-                        'testingApproach': '🧪 Подход к тестированию'
+                        'attentionArchitecture': '👁️ Архитектура внимания',
+                        'perceptualCrossroads': '🔀 Перцептивные перекрестки',
+                        'hiddenPatterns': '🕵️ Скрытые паттерны'
                     }
+                    something_sent = False
                     for key, label in interp_map.items():
+                        # Check if key exists in the loaded data
                         if key in interp_data:
-                            await message.reply_html(f"<b>{label}</b>\n{interp_data[key]}")
-                    results_sent = True
+                            logger.info(f"  Found interpretation key: {key}")
+                            value = interp_data.get(key)
+                            if value:
+                                try:
+                                    logger.info(f"  Attempting to send formatted interpretation for {key}")
+                                    await message.reply_html(f"<b>{label}</b>\n{value}")
+                                    something_sent = True
+                                except Exception as send_e:
+                                    logger.error(f"  Failed to send formatted interpretation for {key}: {send_e}")
+                            else:
+                                logger.warning(f"  Interpretation key '{key}' found but value is empty.")
+                        else:
+                            logger.warning(f"  Interpretation key '{key}' not found in JSON data.")
+                    if something_sent:
+                        results_sent = True # Mark overall success if at least one part was sent
                 except Exception as e:
                     logger.error(f"Error formatting/sending interpretation: {e}")
+                    # Optional: Send raw JSON file as fallback on formatting error
+                    try:
+                        logger.info(f"Attempting to send raw interpretation JSON as fallback due to formatting error.")
+                        await context.bot.send_document(chat_id=chat_id, document=InputFile(interp_path), filename=os.path.basename(interp_path))
+                    except Exception as fallback_e:
+                        logger.error(f"Failed to send raw interpretation JSON fallback: {fallback_e}")
             else:
-                logger.warning(f"Interpretation JSON not found or unreadable: {interp_path}")
+                if interp_path: logger.warning(f"Interpretation JSON file not found at path: {interp_path}")
+                else: logger.info("No Interpretation JSON path found in stdout.")
 
-            # --- Fallback Sending TeX file --- 
+            # --- Fallback Sending TeX file ---
+            # Logic changed slightly: Send TeX only if PDF wasn't successfully generated (regardless of path found)
             if not pdf_path_match: # Only if PDF path wasn't found or didn't exist
                 logger.info("PDF path missing or file not found, attempting fallback to TeX file.")
                 if tex_path:

@@ -1,28 +1,31 @@
 # syntax=docker/dockerfile:1
 FROM python:3.11-slim
 
-# Install essential packages including libmagic for the 'magic' Python module
+# Install TeX Live for PDF generation
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libmagic1 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install minimal TeX Live for PDF generation
-RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    # Dependencies for libraries like Pillow, numpy (often needed)
+    libjpeg-dev \
+    zlib1g-dev \
+    # LaTeX dependencies
     texlive-latex-base \
-    texlive-latex-recommended \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install additional packages only if needed
-RUN apt-get update && apt-get install -y --no-install-recommends \
     texlive-fonts-recommended \
+    texlive-latex-extra \
+    texlive-fonts-extra \
+    lmodern \
+    # For Cyrillic support
+    texlive-lang-cyrillic \
+    # For colored boxes used in the report
+    texlive-tcolorbox \
+    # Clean up
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY requirements.txt ./
-# Explicitly install python-magic first, then the rest
-RUN pip install --no-cache-dir python-magic==0.4.27 && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
