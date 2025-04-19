@@ -285,23 +285,20 @@ def generate_key_findings(data):
                 back_color = "orange!5"
             
             findings_text += f"""
-\\noindent\\fcolorbox{{{box_color}}}{{{back_color}}}{{\\begin{{minipage}}{{\\linewidth}}
-\\textbf{{Проблема {i+1}: {sanitize_latex(category)} — {sanitize_latex(subcategory)}}}\\\\
+\\begin{{tcolorbox}}[colback={back_color}, colframe={box_color}, title=Проблема {i+1}: {sanitize_latex(category)} — {sanitize_latex(subcategory)}, fonttitle=\\bfseries]
 \\begin{{itemize}}
 \\item \\textbf{{Описание:}} {sanitize_latex(description)}
 \\item \\textbf{{Критичность:}} {severity}/100 
 \\item \\textbf{{Научное обоснование:}} {sanitize_latex(reasoning)}
 \\end{{itemize}}
-\\end{{minipage}}}}\n\\vspace{{0.5cm}}\n"""
+\\end{{tcolorbox}}\n"""
     
     section = f"""
 \\section{{Ключевые выводы}}
 
-\\noindent\\fcolorbox{{black!50}}{{white}}{{\\begin{{minipage}}{{\\linewidth}}
-\\textbf{{Наиболее критичные проблемы (80+ баллов)}}\\\\
+\\begin{{tcolorbox}}[colback=white, colframe=black!50, title=Наиболее критичные проблемы (80+ баллов), fonttitle=\\bfseries] % Neutral block, updated title
 В ходе анализа выявлены следующие критические проблемы, требующие первоочередного внимания (при наличии):
-\\end{{minipage}}}}
-\\vspace{{0.5cm}}
+\\end{{tcolorbox}}
 
 {findings_text}
 
@@ -835,38 +832,29 @@ def generate_latex_document(data):
 \\usepackage{{cmap}}
 \\usepackage{{geometry}}
 \\usepackage{{graphicx}}
-\\usepackage[dvipsnames,svgnames]{{xcolor}}
+\\usepackage{{xcolor}}
 \\usepackage{{hyperref}}
-\\usepackage{{tikz}}
-\\usepackage{{tcolorbox}}
-
-% Define a simple colorbox replacement since tcolorbox may not be available
-\\newcommand{{\\simplecolorbox}}[3]{{
-    \\begin{{center}}
-    \\fcolorbox{{#2}}{{#1}}{{\\begin{{minipage}}{{0.95\\textwidth}}
-        \\textbf{{#3}}\\\\
-        \\vspace{{0.2cm}}
-    \\end{{minipage}}}}
-    \\end{{center}}
-}}
-\\newenvironment{{tcolorbox}}[1][]{{
-    \\begin{{center}}
-    \\def\\tcbcol{{blue!5}}
-    \\def\\tcbframe{{blue!40}}
-    \\def\\tcbtitle{{}}
-    \\begin{{minipage}}{{0.95\\textwidth}}
-    \\noindent\\fcolorbox{{\\tcbframe}}{{\\tcbcol}}{{\\begin{{minipage}}{{\\linewidth}}
-}}{{
-    \\end{{minipage}}}}
-    \\end{{minipage}}
-    \\end{{center}}
-}}
+\\usepackage{{array}}
+\\usepackage{{longtable}}
+\\usepackage{{booktabs}}
+\\usepackage{{colortbl}}
+\\usepackage{{fancyhdr}}
+\\usepackage{{lastpage}}
+\\usepackage{{multirow}}
+\\usepackage[english, russian]{{babel}}
+\\usepackage{tikz} % For drawing diagrams
+\\usepackage{float} % For [H] placement
+\\usepackage{tcolorbox} % For colored blocks
 
 \\geometry{{ a4paper, top=2.5cm, bottom=2.5cm, left=2.5cm, right=2.5cm }}
 \\hypersetup{{ colorlinks=true, linkcolor=blue, filecolor=magenta, urlcolor=cyan, 
     pdftitle={{Отчет об анализе пользовательского интерфейса}}, pdfauthor={{Visual Interface Analyzer}} }}
 
-\\pagestyle{{plain}}
+\\pagestyle{{fancy}}
+\\fancyhf{{}}
+\\rhead{{Отчет об анализе UI}}
+\\lhead{{Visual Interface Analyzer}}
+\\cfoot{{Страница \\thepage}}
 
 \\begin{{document}}
 
