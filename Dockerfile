@@ -16,8 +16,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     lmodern \
     # For Cyrillic support
     texlive-lang-cyrillic \
-    # For colored boxes used in the report
-    texlive-tcolorbox \
     # Clean up
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
