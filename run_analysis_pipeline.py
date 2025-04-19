@@ -38,6 +38,9 @@ DEFAULT_INTERPRETATION_PROMPT = os.path.join(SCRIPT_DIR, 'gemini_interpretation_
 DEFAULT_RECOMMENDATIONS_PROMPT = os.path.join(SCRIPT_DIR, 'gemini_recommendations_only_prompt.md')
 DEFAULT_COORDS_PROMPT = os.path.join(SCRIPT_DIR, 'gemini_simple_prompt.md') # Assuming this is the coords prompt
 
+# --- Configuration Flags ---
+GENERATE_PDF_IN_PIPELINE = True # Control whether the pipeline attempts PDF generation
+
 # --- Helper Functions ---
 
 # Load prompts at the start
