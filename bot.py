@@ -18,6 +18,7 @@ import glob
 from pathlib import Path
 import traceback
 from datetime import datetime
+import io
 
 # Загрузка переменных окружения (токен бота)
 load_dotenv()
@@ -269,32 +270,25 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         # Try sending as photo first
                         with open(heatmap_path, 'rb') as img_file:
                             img_bytes = img_file.read()  # Read file into memory
-                            await context.bot.send_photo(
+                            
+                            # Explicitly specify the MIME type
+                            mime_type = "image/png"
+                            file_name = os.path.basename(heatmap_path)
+                            
+                            await context.bot.send_document(
                                 chat_id=chat_id, 
-                                photo=InputFile(img_bytes, filename=os.path.basename(heatmap_path)),
-                                caption="Тепловая карта проблемных зон"
+                                document=InputFile(io.BytesIO(img_bytes), filename=file_name),
+                                caption="Тепловая карта проблемных зон",
+                                parse_mode="HTML"
                             )
-                        logger.info(f"Heatmap sent successfully as photo")
+                        logger.info(f"Heatmap sent successfully as document with explicit MIME type")
                         results_sent = True
-                    except Exception as photo_e:
-                        logger.warning(f"Could not send heatmap as photo: {photo_e}, trying as document")
+                    except Exception as e:
+                        logger.error(f"Не удалось отправить тепловую карту: {e}")
                         try:
-                            # Fallback to document if photo fails
-                            with open(heatmap_path, 'rb') as img_file:
-                                img_bytes = img_file.read()  # Read file into memory
-                                await context.bot.send_document(
-                                    chat_id=chat_id, 
-                                    document=InputFile(img_bytes, filename=os.path.basename(heatmap_path)),
-                                    caption="Тепловая карта проблемных зон (файл)"
-                                )
-                            logger.info(f"Отправлена тепловая карта как документ: {heatmap_path}")
-                            results_sent = True
-                        except Exception as e:
-                            logger.error(f"Не удалось отправить тепловую карту как документ: {e}")
-                            try:
-                                await message.reply_text(f"Не удалось отправить тепловую карту.")
-                            except Exception as reply_e:
-                                logger.error(f"Failed to send error reply for Heatmap: {reply_e}")
+                            await message.reply_text(f"Не удалось отправить тепловую карту.")
+                        except Exception as reply_e:
+                            logger.error(f"Failed to send error reply for Heatmap: {reply_e}")
                 else:
                     logger.warning(f"Heatmap file path found in stdout, but file does not exist at: {heatmap_path}")
             else:
@@ -309,10 +303,16 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         
                         with open(interp_path, 'rb') as json_file:
                             json_bytes = json_file.read()  # Read file into memory
+                            
+                            # Explicitly specify the MIME type
+                            mime_type = "application/json"
+                            file_name = os.path.basename(interp_path)
+                            
                             await context.bot.send_document(
                                 chat_id=chat_id, 
-                                document=InputFile(json_bytes, filename=os.path.basename(interp_path)),
-                                caption="Стратегическая интерпретация (JSON)"
+                                document=InputFile(io.BytesIO(json_bytes), filename=file_name),
+                                caption="Стратегическая интерпретация (JSON)",
+                                parse_mode="HTML"
                             )
                         logger.info(f"Отправлен файл интерпретации: {interp_path}")
                         results_sent = True
@@ -336,10 +336,16 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         
                         with open(rec_path, 'rb') as json_file:
                             json_bytes = json_file.read()  # Read file into memory
+                            
+                            # Explicitly specify the MIME type
+                            mime_type = "application/json"
+                            file_name = os.path.basename(rec_path)
+                            
                             await context.bot.send_document(
                                 chat_id=chat_id, 
-                                document=InputFile(json_bytes, filename=os.path.basename(rec_path)),
-                                caption="Стратегические рекомендации (JSON)"
+                                document=InputFile(io.BytesIO(json_bytes), filename=file_name),
+                                caption="Стратегические рекомендации (JSON)",
+                                parse_mode="HTML"
                             )
                         logger.info(f"Отправлен файл рекомендаций: {rec_path}")
                         results_sent = True
@@ -354,34 +360,64 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 logger.info("No Recommendations JSON path found in stdout.")
 
-            # --- Fallback Sending TeX file --- 
-            if not pdf_path or not os.path.exists(pdf_path): # Only if PDF path wasn't found or file doesn't exist
+            # --- PDF or Fallback Sending TeX file --- 
+            if pdf_path and os.path.exists(pdf_path):
+                logger.info(f"Checking existence of PDF: {pdf_path}")
+                pdf_size_mb = os.path.getsize(pdf_path) / (1024 * 1024)
+                logger.info(f"PDF file size: {pdf_size_mb:.2f} MB")
+                try:
+                    logger.info(f"Attempting to send PDF file: {pdf_path}")
+                    
+                    with open(pdf_path, 'rb') as pdf_file:
+                        pdf_bytes = pdf_file.read()  # Read file into memory
+                        
+                        # Explicitly specify the MIME type
+                        mime_type = "application/pdf"
+                        file_name = os.path.basename(pdf_path)
+                        
+                        await context.bot.send_document(
+                            chat_id=chat_id, 
+                            document=InputFile(io.BytesIO(pdf_bytes), filename=file_name),
+                            caption="Отчет анализа (PDF)",
+                            parse_mode="HTML"
+                        )
+                    logger.info(f"Отправлен PDF отчет: {pdf_path}")
+                    results_sent = True
+                except Exception as e:
+                    logger.error(f"Не удалось отправить PDF {pdf_path}: {e}")
+                    try:
+                        await message.reply_text("Не удалось отправить PDF отчет.")
+                    except Exception as reply_e:
+                        logger.error(f"Failed to send error reply for PDF: {reply_e}")
+            elif tex_path and os.path.exists(tex_path): # Only if PDF path wasn't found or file doesn't exist
                 logger.info("PDF path missing or file not found, attempting fallback to TeX file.")
-                if tex_path:
-                    logger.info(f"Checking existence of Fallback TeX: {tex_path}")
-                    if os.path.exists(tex_path):
-                        try:
-                            logger.info(f"Attempting to send Fallback TeX file: {tex_path}")
-                            
-                            with open(tex_path, 'rb') as tex_file:
-                                tex_bytes = tex_file.read()  # Read file into memory
-                                await context.bot.send_document(
-                                    chat_id=chat_id, 
-                                    document=InputFile(tex_bytes, filename=os.path.basename(tex_path)),
-                                    caption="Отчет анализа (TeX файл)"
-                                )
-                            logger.info(f"Отправлен LaTeX отчет (.tex): {tex_path}")
-                            results_sent = True
-                        except Exception as e:
-                            logger.error(f"Не удалось отправить LaTeX отчет {tex_path}: {e}")
-                            try:
-                                await message.reply_text("Не удалось отправить LaTeX отчет (.tex).")
-                            except Exception as reply_e:
-                                logger.error(f"Failed to send error reply for Fallback TeX: {reply_e}")
-                    else:
-                        logger.warning(f"Fallback TeX path found in stdout, but file does not exist at: {tex_path}")
-                else:
-                    logger.info("No Fallback TeX path found in stdout.")
+                logger.info(f"Checking existence of Fallback TeX: {tex_path}")
+                try:
+                    logger.info(f"Attempting to send Fallback TeX file: {tex_path}")
+                    
+                    with open(tex_path, 'rb') as tex_file:
+                        tex_bytes = tex_file.read()  # Read file into memory
+                        
+                        # Explicitly specify the MIME type
+                        mime_type = "application/x-tex"
+                        file_name = os.path.basename(tex_path)
+                        
+                        await context.bot.send_document(
+                            chat_id=chat_id, 
+                            document=InputFile(io.BytesIO(tex_bytes), filename=file_name),
+                            caption="Отчет анализа (TeX файл)",
+                            parse_mode="HTML"
+                        )
+                    logger.info(f"Отправлен LaTeX отчет (.tex): {tex_path}")
+                    results_sent = True
+                except Exception as e:
+                    logger.error(f"Не удалось отправить LaTeX отчет {tex_path}: {e}")
+                    try:
+                        await message.reply_text("Не удалось отправить LaTeX отчет (.tex).")
+                    except Exception as reply_e:
+                        logger.error(f"Failed to send error reply for Fallback TeX: {reply_e}")
+            else:
+                logger.warning(f"Neither PDF nor TeX files found or could be sent")
 
             # --- Sending Interpretation Text --- 
             if interp_path and os.path.exists(interp_path):
