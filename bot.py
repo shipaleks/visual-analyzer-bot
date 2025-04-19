@@ -187,7 +187,10 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         results_sent = True
                     except Exception as e:
                         logger.error(f"Не удалось отправить PDF {pdf_path}: {e}")
-                        await message.reply_text(f"Не удалось отправить PDF отчет.") # Simplified error
+                        try:
+                            await message.reply_text(f"Не удалось отправить PDF отчет.") # Simplified error
+                        except Exception as reply_e:
+                             logger.error(f"Failed to send error reply for PDF: {reply_e}")
                 else:
                     logger.warning(f"PDF file path found in stdout, but file does not exist at: {pdf_path}")
             else:
@@ -196,15 +199,20 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # --- Sending Heatmap --- 
             if heatmap_path:
                 logger.info(f"Checking existence of Heatmap: {heatmap_path}")
+                heatmap_size_mb = os.path.getsize(heatmap_path) / (1024 * 1024) if os.path.exists(heatmap_path) else 0
+                logger.info(f"Heatmap file size: {heatmap_size_mb:.2f} MB")
                 if os.path.exists(heatmap_path):
                     try:
-                        logger.info(f"Attempting to send Heatmap: {heatmap_path}")
-                        await context.bot.send_photo(chat_id=chat_id, photo=InputFile(heatmap_path), caption="Тепловая карта проблемных зон")
+                        logger.info(f"Attempting to send Heatmap as document: {heatmap_path}")
+                        await context.bot.send_document(chat_id=chat_id, document=InputFile(heatmap_path), filename=os.path.basename(heatmap_path), caption="Тепловая карта проблемных зон (файл)")
                         logger.info(f"Отправлена тепловая карта: {heatmap_path}")
                         results_sent = True
                     except Exception as e:
                         logger.error(f"Не удалось отправить тепловую карту {heatmap_path}: {e}")
-                        await message.reply_text(f"Не удалось отправить тепловую карту.") # Simplified error
+                        try:
+                            await message.reply_text(f"Не удалось отправить тепловую карту.") # Simplified error
+                        except Exception as reply_e:
+                             logger.error(f"Failed to send error reply for Heatmap: {reply_e}")
                 else:
                     logger.warning(f"Heatmap file path found in stdout, but file does not exist at: {heatmap_path}")
             else:
@@ -221,7 +229,10 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         results_sent = True
                     except Exception as e:
                         logger.error(f"Не удалось отправить файл интерпретации {interp_path}: {e}")
-                        await message.reply_text("Не удалось отправить файл интерпретации.")
+                        try:
+                            await message.reply_text("Не удалось отправить файл интерпретации.")
+                        except Exception as reply_e:
+                             logger.error(f"Failed to send error reply for Interpretation JSON: {reply_e}")
                 else:
                     logger.warning(f"Interpretation JSON path found in stdout, but file does not exist at: {interp_path}")
             else:
@@ -238,7 +249,10 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         results_sent = True
                     except Exception as e:
                         logger.error(f"Не удалось отправить файл рекомендаций {rec_path}: {e}")
-                        await message.reply_text("Не удалось отправить файл рекомендаций.")
+                        try:
+                            await message.reply_text("Не удалось отправить файл рекомендаций.")
+                        except Exception as reply_e:
+                             logger.error(f"Failed to send error reply for Recommendations JSON: {reply_e}")
                 else:
                     logger.warning(f"Recommendations JSON path found in stdout, but file does not exist at: {rec_path}")
             else:
@@ -257,7 +271,10 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             results_sent = True
                         except Exception as e:
                             logger.error(f"Не удалось отправить LaTeX отчет {tex_path}: {e}")
-                            await message.reply_text("Не удалось отправить LaTeX отчет (.tex).")
+                            try:
+                                await message.reply_text("Не удалось отправить LaTeX отчет (.tex).")
+                            except Exception as reply_e:
+                                 logger.error(f"Failed to send error reply for Fallback TeX: {reply_e}")
                     else:
                         logger.warning(f"Fallback TeX path found in stdout, but file does not exist at: {tex_path}")
                 else:
@@ -279,6 +296,8 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         for chunk in text_chunks:
                             await message.reply_text(f"📄 Интерпретация (часть):\n```json\n{chunk}\n```", parse_mode="Markdown")
                         results_sent = True # Mark as sent even if only text is sent
+                    except telegram.error.BadRequest as e:
+                        logger.error(f"Error sending interpretation text (possibly Markdown issue): {e}")
                     except Exception as e:
                         logger.error(f"Не удалось отправить текст интерпретации {interp_path}: {e}")
                 else:
@@ -299,6 +318,8 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         for chunk in text_chunks:
                             await message.reply_text(f"💡 Рекомендации (часть):\n```json\n{chunk}\n```", parse_mode="Markdown")
                         results_sent = True
+                    except telegram.error.BadRequest as e:
+                        logger.error(f"Error sending recommendations text (possibly Markdown issue): {e}")
                     except Exception as e:
                         logger.error(f"Не удалось отправить текст рекомендаций {rec_path}: {e}")
                 else:
@@ -307,6 +328,8 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.info("No Recommendations JSON path found in stdout (for text sending).")
 
             if not results_sent:
+                # If after all attempts nothing was sent, inform the user
+                logger.warning("No results were successfully sent to the user.")
                 await message.reply_text("Не удалось найти или отправить файлы результатов после анализа.")
 
             # Очистка: удаляем папку с результатами

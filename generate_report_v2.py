@@ -829,6 +829,7 @@ def generate_latex_document(data):
 \\documentclass[10pt, a4paper]{{article}}
 \\usepackage[T2A]{{fontenc}}
 \\usepackage[utf8]{{inputenc}}
+\\usepackage{{cmap}}
 \\usepackage{{geometry}}
 \\usepackage{{graphicx}}
 \\usepackage{{xcolor}}
