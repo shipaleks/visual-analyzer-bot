@@ -40,6 +40,17 @@ DEFAULT_COORDS_PROMPT = os.path.join(SCRIPT_DIR, 'gemini_simple_prompt.md') # As
 
 # --- Helper Functions ---
 
+# Load prompts at the start
+try:
+    with open(DEFAULT_COORDS_PROMPT, 'r', encoding='utf-8') as f:
+        COORDINATES_PROMPT_TEMPLATE = f.read()
+except FileNotFoundError:
+    print(f"!!! КРИТИЧЕСКАЯ ОШИБКА: Файл промпта координат {DEFAULT_COORDS_PROMPT} не найден !!!")
+    COORDINATES_PROMPT_TEMPLATE = None # Set to None to handle error downstream
+except Exception as e:
+    print(f"!!! КРИТИЧЕСКАЯ ОШИБКА: Не удалось прочитать файл промпта координат {DEFAULT_COORDS_PROMPT}: {e} !!!")
+    COORDINATES_PROMPT_TEMPLATE = None
+
 def run_command(command, description):
     """Runs a command and prints status."""
     print(f"--- Запуск: {description} ---")
@@ -192,16 +203,16 @@ async def run_pipeline(image_path):
                         print(f"    Успешно обработан ответ Gemini. Найдено {valid_coords_count} валидных координат.")
                         coords_successfully_parsed = True
                     else:
-                        logger.error("!!! Ошибка: Gemini Координаты JSON не содержит валидных элементов или список пуст. !!!")
+                        print("!!! Ошибка: Gemini Координаты JSON не содержит валидных элементов или список пуст. !!!")
                         pipeline_error_details += f"Gemini Coords JSON has no valid elements or list is empty.\n"
 
             except json.JSONDecodeError as e:
-                logger.error(f"!!! Ошибка парсинга JSON ответа от Gemini (Координаты). !!!")
-                logger.error(f"  Ошибка: {e}")
-                logger.error(f"  Raw response text causing error:\n---\n{gemini_response_text[:1000]}...\n---")
+                print(f"!!! Ошибка парсинга JSON ответа от Gemini (Координаты). !!!")
+                print(f"  Ошибка: {e}")
+                print(f"  Raw response text causing error:\n---\n{gemini_response_text[:1000]}...\n---")
                 pipeline_error_details += f"Failed to parse Gemini Coords JSON: {e}\nRaw Response Snippet: {gemini_response_text[:200]}\n"
         except Exception as e:
-            logger.error(f"!!! Неожиданная ошибка при запросе координат Gemini: {e} !!!")
+            print(f"!!! Неожиданная ошибка при запросе координат Gemini: {e} !!!")
             traceback.print_exc()
             pipeline_error_details += f"Unexpected error during Gemini Coordinates: {e}\n"
             
