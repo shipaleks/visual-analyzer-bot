@@ -141,6 +141,157 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     logging.warning(f"Could not determine MIME type for {file_path}, using default")
                     return 'application/octet-stream'
 
+        # Функции для форматирования и отправки структурированных данных
+        async def send_formatted_interpretation(chat_id, interpretation_data):
+            """Форматирует и отправляет стратегическую интерпретацию в виде отдельных сообщений."""
+            try:
+                if not interpretation_data or "strategicInterpretation" not in interpretation_data:
+                    logger.warning("Структура интерпретации не содержит ожидаемых данных")
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        text="⚠️ Не удалось обработать данные интерпретации в удобочитаемом формате."
+                    )
+                    return False
+
+                # Заголовок интерпретации
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="*📊 СТРАТЕГИЧЕСКАЯ ИНТЕРПРЕТАЦИЯ*\n\nАнализ ключевых аспектов интерфейса:",
+                    parse_mode="Markdown"
+                )
+
+                # Перебираем все разделы интерпретации и отправляем их как отдельные сообщения
+                interpretation = interpretation_data["strategicInterpretation"]
+                sections = {
+                    "cognitiveEcosystem": "🌐 *Когнитивная экосистема*",
+                    "businessUserTension": "⚖️ *Напряжение между бизнес-целями и потребностями пользователей*",
+                    "attentionArchitecture": "🏗️ *Архитектура внимания*",
+                    "perceptualCrossroads": "🔄 *Перцептивные перекрестки*",
+                    "hiddenPatterns": "🧩 *Скрытые паттерны*"
+                }
+
+                for key, title in sections.items():
+                    if key in interpretation and interpretation[key]:
+                        text = f"{title}\n\n{interpretation[key]}"
+                        # Разбиваем длинный текст на части при необходимости
+                        MAX_LEN = 4000
+                        if len(text) <= MAX_LEN:
+                            await context.bot.send_message(
+                                chat_id=chat_id,
+                                text=text,
+                                parse_mode="Markdown"
+                            )
+                        else:
+                            # Разделяем на части, сохраняя заголовок в каждой части
+                            parts = [text[i:i+MAX_LEN-len(title)-10] for i in range(0, len(text)-len(title)-10, MAX_LEN-len(title)-10)]
+                            for i, part in enumerate(parts):
+                                if i == 0:
+                                    message = part
+                                else:
+                                    message = f"{title} (продолжение)\n\n{part}"
+                                await context.bot.send_message(
+                                    chat_id=chat_id,
+                                    text=message,
+                                    parse_mode="Markdown"
+                                )
+                return True
+            except Exception as e:
+                logger.error(f"Ошибка при отправке форматированной интерпретации: {e}")
+                traceback.print_exc()
+                return False
+
+        async def send_formatted_recommendations(chat_id, recommendations_data):
+            """Форматирует и отправляет стратегические рекомендации в виде отдельных сообщений."""
+            try:
+                if not recommendations_data or "strategicRecommendations" not in recommendations_data:
+                    logger.warning("Структура рекомендаций не содержит ожидаемых данных")
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        text="⚠️ Не удалось обработать данные рекомендаций в удобочитаемом формате."
+                    )
+                    return False
+
+                # Заголовок рекомендаций
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="*💡 СТРАТЕГИЧЕСКИЕ РЕКОМЕНДАЦИИ*\n\nПредлагаемые улучшения интерфейса:",
+                    parse_mode="Markdown"
+                )
+
+                # Перебираем все рекомендации и отправляем их как отдельные сообщения
+                recommendations = recommendations_data["strategicRecommendations"]
+                for i, rec in enumerate(recommendations, 1):
+                    # Формируем текст рекомендации
+                    text = f"*{i}. {rec.get('title', 'Рекомендация')}*\n\n"
+                    
+                    if "problemStatement" in rec:
+                        text += f"*Проблема:*\n{rec['problemStatement']}\n\n"
+                    
+                    if "solutionDescription" in rec:
+                        text += f"*Решение:*\n{rec['solutionDescription']}\n\n"
+                    
+                    if "expectedImpact" in rec:
+                        text += f"*Ожидаемый эффект:*\n{rec['expectedImpact']}\n\n"
+                    
+                    if "businessConstraints" in rec:
+                        text += f"*Бизнес-ограничения:*\n{rec['businessConstraints']}\n\n"
+                    
+                    # Дополнительная информация в зависимости от длины основного текста
+                    additional_text = ""
+                    if "crossDomainExample" in rec:
+                        additional_text += f"*Пример из других областей:*\n{rec['crossDomainExample']}\n\n"
+                    
+                    if "testingApproach" in rec:
+                        additional_text += f"*Подход к тестированию:*\n{rec['testingApproach']}\n\n"
+                    
+                    # Разбиваем на части при необходимости
+                    MAX_LEN = 4000
+                    if len(text) <= MAX_LEN:
+                        await context.bot.send_message(
+                            chat_id=chat_id,
+                            text=text,
+                            parse_mode="Markdown"
+                        )
+                    else:
+                        # Если основной текст слишком длинный, разбиваем его
+                        parts = [text[i:i+MAX_LEN] for i in range(0, len(text), MAX_LEN)]
+                        for j, part in enumerate(parts):
+                            part_text = part
+                            if j == 0:
+                                part_text = f"*{i}. {rec.get('title', 'Рекомендация')}*\n\n" + part[len(f"*{i}. {rec.get('title', 'Рекомендация')}*\n\n"):]
+                            else:
+                                part_text = f"*{i}. {rec.get('title', 'Рекомендация')}* (продолжение {j+1})\n\n" + part
+                            
+                            await context.bot.send_message(
+                                chat_id=chat_id,
+                                text=part_text,
+                                parse_mode="Markdown"
+                            )
+                    
+                    # Отправляем дополнительную информацию отдельным сообщением, если она есть
+                    if additional_text and len(additional_text) > 0:
+                        if len(additional_text) <= MAX_LEN:
+                            await context.bot.send_message(
+                                chat_id=chat_id,
+                                text=f"*Дополнительно по рекомендации {i}:*\n\n{additional_text}",
+                                parse_mode="Markdown"
+                            )
+                        else:
+                            # Разбиваем дополнительный текст на части
+                            add_parts = [additional_text[i:i+MAX_LEN] for i in range(0, len(additional_text), MAX_LEN)]
+                            for j, add_part in enumerate(add_parts):
+                                await context.bot.send_message(
+                                    chat_id=chat_id,
+                                    text=f"*Дополнительно по рекомендации {i} (часть {j+1}):*\n\n{add_part}",
+                                    parse_mode="Markdown"
+                                )
+                
+                return True
+            except Exception as e:
+                logger.error(f"Ошибка при отправке форматированных рекомендаций: {e}")
+                traceback.print_exc()
+                return False
+
         # Запускаем пайплайн анализа
         try:
             # Check if pipeline script exists
@@ -299,29 +450,34 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.info(f"Checking existence of Interpretation JSON: {interp_path}")
                 if os.path.exists(interp_path):
                     try:
-                        logger.info(f"Attempting to send Interpretation JSON file: {interp_path}")
+                        # Сначала отправляем форматированный текст
+                        logger.info(f"Attempting to read and format Interpretation: {interp_path}")
+                        with open(interp_path, 'r', encoding='utf-8') as f:
+                            interp_data = json.load(f)
                         
+                        interp_formatted_sent = await send_formatted_interpretation(chat_id, interp_data)
+                        
+                        # Затем отправляем исходный JSON-файл как документ для сохранения
+                        logger.info(f"Attempting to send Interpretation JSON file: {interp_path}")
                         with open(interp_path, 'rb') as json_file:
-                            json_bytes = json_file.read()  # Read file into memory
-                            
-                            # Explicitly specify the MIME type
+                            json_bytes = json_file.read() 
                             mime_type = "application/json"
                             file_name = os.path.basename(interp_path)
                             
                             await context.bot.send_document(
                                 chat_id=chat_id, 
                                 document=InputFile(io.BytesIO(json_bytes), filename=file_name),
-                                caption="Стратегическая интерпретация (JSON)",
+                                caption="Стратегическая интерпретация (JSON для сохранения)",
                                 parse_mode="HTML"
                             )
                         logger.info(f"Отправлен файл интерпретации: {interp_path}")
                         results_sent = True
                     except Exception as e:
-                        logger.error(f"Не удалось отправить файл интерпретации {interp_path}: {e}")
+                        logger.error(f"Не удалось отправить интерпретацию {interp_path}: {e}")
                         try:
-                            await message.reply_text("Не удалось отправить файл интерпретации.")
+                            await message.reply_text("Не удалось отправить интерпретацию.")
                         except Exception as reply_e:
-                            logger.error(f"Failed to send error reply for Interpretation JSON: {reply_e}")
+                            logger.error(f"Failed to send error reply for Interpretation: {reply_e}")
                 else:
                     logger.warning(f"Interpretation JSON path found in stdout, but file does not exist at: {interp_path}")
             else:
@@ -332,19 +488,24 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.info(f"Checking existence of Recommendations JSON: {rec_path}")
                 if os.path.exists(rec_path):
                     try:
-                        logger.info(f"Attempting to send Recommendations JSON file: {rec_path}")
+                        # Сначала отправляем форматированный текст
+                        logger.info(f"Attempting to read and format Recommendations: {rec_path}")
+                        with open(rec_path, 'r', encoding='utf-8') as f:
+                            rec_data = json.load(f)
                         
+                        rec_formatted_sent = await send_formatted_recommendations(chat_id, rec_data)
+                        
+                        # Затем отправляем исходный JSON-файл как документ для сохранения
+                        logger.info(f"Attempting to send Recommendations JSON file: {rec_path}")
                         with open(rec_path, 'rb') as json_file:
-                            json_bytes = json_file.read()  # Read file into memory
-                            
-                            # Explicitly specify the MIME type
+                            json_bytes = json_file.read()
                             mime_type = "application/json"
                             file_name = os.path.basename(rec_path)
                             
                             await context.bot.send_document(
                                 chat_id=chat_id, 
                                 document=InputFile(io.BytesIO(json_bytes), filename=file_name),
-                                caption="Стратегические рекомендации (JSON)",
+                                caption="Стратегические рекомендации (JSON для сохранения)",
                                 parse_mode="HTML"
                             )
                         logger.info(f"Отправлен файл рекомендаций: {rec_path}")
@@ -418,41 +579,6 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         logger.error(f"Failed to send error reply for Fallback TeX: {reply_e}")
             else:
                 logger.warning(f"Neither PDF nor TeX files found or could be sent")
-
-            # --- Sending Interpretation Text --- 
-            if interp_path and os.path.exists(interp_path):
-                try:
-                    logger.info(f"Attempting to read and send Interpretation text: {interp_path}")
-                    with open(interp_path, 'r', encoding='utf-8') as f:
-                        interp_data = json.load(f) # Load as JSON to potentially format later
-                    # Send raw JSON for now, can format later if needed
-                    interp_text = json.dumps(interp_data, indent=2, ensure_ascii=False)
-                    # Split into chunks if too long
-                    MAX_MSG_LEN = 4000
-                    text_chunks = [interp_text[i:i+MAX_MSG_LEN] for i in range(0, len(interp_text), MAX_MSG_LEN)]
-                    for chunk in text_chunks:
-                        await message.reply_text(f"📄 Интерпретация (часть):\n```json\n{chunk}\n```", parse_mode="Markdown")
-                    results_sent = True # Mark as sent even if only text is sent
-                except telegram.error.BadRequest as e:
-                    logger.error(f"Error sending interpretation text (possibly Markdown issue): {e}")
-                except Exception as e:
-                    logger.error(f"Не удалось отправить текст интерпретации {interp_path}: {e}")
-
-            # --- Sending Recommendations Text --- 
-            if rec_path and os.path.exists(rec_path):
-                try:
-                    logger.info(f"Attempting to read and send Recommendations text: {rec_path}")
-                    with open(rec_path, 'r', encoding='utf-8') as f:
-                        rec_data = json.load(f) # Load as JSON
-                    rec_text = json.dumps(rec_data, indent=2, ensure_ascii=False)
-                    text_chunks = [rec_text[i:i+MAX_MSG_LEN] for i in range(0, len(rec_text), MAX_MSG_LEN)]
-                    for chunk in text_chunks:
-                        await message.reply_text(f"💡 Рекомендации (часть):\n```json\n{chunk}\n```", parse_mode="Markdown")
-                    results_sent = True
-                except telegram.error.BadRequest as e:
-                    logger.error(f"Error sending recommendations text (possibly Markdown issue): {e}")
-                except Exception as e:
-                    logger.error(f"Не удалось отправить текст рекомендаций {rec_path}: {e}")
 
             if not results_sent:
                 # If after all attempts nothing was sent, inform the user
