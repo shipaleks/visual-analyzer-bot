@@ -268,7 +268,7 @@ def run_gpt_analysis(image_path, interface_type, user_scenario, output_json_path
         return False, None
 
 # --- Refactored Gemini Coordinates Function ---
-def run_gemini_coordinates(image_path, gpt_result_data, output_raw_json_path, output_parsed_json_path):
+def run_gemini_coordinates(image_path, gpt_result_data, output_raw_json_path, output_parsed_json_path, formatted_prompt=None):
     """Runs Gemini coordinate extraction and saves raw/parsed results."""
     print(f"--- Запуск Gemini Координат для: {image_path} ---")
 
@@ -306,63 +306,69 @@ def run_gemini_coordinates(image_path, gpt_result_data, output_raw_json_path, ou
             area_id = area.get('id', f'unknown_{i}')
             elements_text += f"- ID: {area_id}, Severity: {sev}, Description: {desc}, Location Hint: {loc}\n"
 
-        # --- Simplified Prompt (keep as is) ---
-        prompt_simplified = f"""
-        You are a specialized visual analysis system designed to extract precise coordinates for identified UI usability issues in images. Your task is to locate specific problematic elements and provide their bounding box coordinates using a normalized coordinate system.
+        # --- Используем переданный промпт или стандартный ---
+        if formatted_prompt:
+            prompt_simplified = formatted_prompt
+            print("    Используется форматированный промпт из основного скрипта.")
+        else:
+            # --- Simplified Prompt (keep as is) ---
+            prompt_simplified = f"""
+            You are a specialized visual analysis system designed to extract precise coordinates for identified UI usability issues in images. Your task is to locate specific problematic elements and provide their bounding box coordinates using a normalized coordinate system.
 
 
-        These are the problematic elements you need to locate:
+            These are the problematic elements you need to locate:
 
-        <problematic_elements>
-        {elements_text}
-        </problematic_elements>
+            <problematic_elements>
+            {elements_text}
+            </problematic_elements>
 
-        Instructions:
+            Instructions:
 
-        1. Coordinate System:
-           - Use a normalized coordinate system between 0-1000 for both X and Y axes.
-           - The origin (0,0) is at the TOP LEFT of the image.
-           - For each element, return coordinates as [y_min, x_min, y_max, x_max].
-           - y_min = top edge, y_max = bottom edge, x_min = left edge, x_max = right edge.
+            1. Coordinate System:
+               - Use a normalized coordinate system between 0-1000 for both X and Y axes.
+               - The origin (0,0) is at the TOP LEFT of the image.
+               - For each element, return coordinates as [y_min, x_min, y_max, x_max].
+               - y_min = top edge, y_max = bottom edge, x_min = left edge, x_max = right edge.
 
-        2. Element Location Process:
-           - Carefully examine the provided image.
-           - For each element ID listed in the problematic_elements, find the described element.
-           - Create the MOST PRECISE, TIGHTEST possible bounding box around ONLY the specific visual element mentioned in the description. Use the 'Location Hint' to help pinpoint it.
-           - **CRITICAL: AVOID creating bounding boxes that span nearly the entire width of the image content area unless the described element itself is explicitly that wide (e.g., a full-width header background). Focus on the specific, local element.**
-           - **Example: If a problem description is 'misaligned button within a panel', the bounding box MUST encompass ONLY the button, NOT the entire panel or the row it sits in.**
-           - If multiple instances exist, choose the one most relevant to the description.
-           - If an element cannot be located, set its coordinates to null.
+            2. Element Location Process:
+               - Carefully examine the provided image.
+               - For each element ID listed in the problematic_elements, find the described element.
+               - Create the MOST PRECISE, TIGHTEST possible bounding box around ONLY the specific visual element mentioned in the description. Use the 'Location Hint' to help pinpoint it.
+               - **CRITICAL: AVOID creating bounding boxes that span nearly the entire width of the image content area unless the described element itself is explicitly that wide (e.g., a full-width header background). Focus on the specific, local element.**
+               - **Example: If a problem description is 'misaligned button within a panel', the bounding box MUST encompass ONLY the button, NOT the entire panel or the row it sits in.**
+               - If multiple instances exist, choose the one most relevant to the description.
+               - If an element cannot be located, set its coordinates to null.
 
-        3. Coordinate Validation:
-           - Ensure that x_min < x_max and y_min < y_max for all bounding boxes.
-           - If this condition is not met, do not include the coordinates in the final output JSON's element_coordinates list for that element.
+            3. Coordinate Validation:
+               - Ensure that x_min < x_max and y_min < y_max for all bounding boxes.
+               - If this condition is not met, do not include the coordinates in the final output JSON's element_coordinates list for that element.
 
-        4. Confidence Assessment:
-           - Assign a confidence score (0.0-1.0) to each element based on how certain you are of its location and bounding box accuracy.
+            4. Confidence Assessment:
+               - Assign a confidence score (0.0-1.0) to each element based on how certain you are of its location and bounding box accuracy.
 
-        Output Format:
-        Provide your response ONLY as valid JSON with the following structure (no other text before or after the JSON block):
+            Output Format:
+            Provide your response ONLY as valid JSON with the following structure (no other text before or after the JSON block):
 
-        {{
-          "element_coordinates": [
             {{
-              "id": "problem_area_id from input",
-              "element": "brief description of the identified element",
-              "coordinates": [y_min, x_min, y_max, x_max], // Normalized 0-1000 or null
-              "confidence": 0.0-1.0
+              "element_coordinates": [
+                {{
+                  "id": "problem_area_id from input",
+                  "element": "brief description of the identified element",
+                  "coordinates": [y_min, x_min, y_max, x_max], // Normalized 0-1000 or null
+                  "confidence": 0.0-1.0
+                }}
+                // ... (repeat for each element where valid coordinates were found)
+              ]
             }}
-            // ... (repeat for each element where valid coordinates were found)
-          ]
-        }}
 
-        Remember:
-        - Strictly adhere to the JSON format as the ONLY output.
-        - Only include valid coordinates (y_min < y_max, x_min < x_max) or null in the 'coordinates' field.
-        - Ensure that all coordinate values are between 0 and 1000.
+            Remember:
+            - Strictly adhere to the JSON format as the ONLY output.
+            - Only include valid coordinates (y_min < y_max, x_min < x_max) or null in the 'coordinates' field.
+            - Ensure that all coordinate values are between 0 and 1000.
 
-        Begin your coordinate extraction now.
-        """
+            Begin your coordinate extraction now.
+            """
+            print("    Используется стандартный встроенный промпт.")
         # --- End Prompt ---
 
         # Make API Call
