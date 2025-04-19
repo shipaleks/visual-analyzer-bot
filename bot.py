@@ -34,6 +34,9 @@ logger = logging.getLogger(__name__)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PIPELINE_SCRIPT_PATH = os.path.join(SCRIPT_DIR, 'run_analysis_pipeline.py')
 
+# Initialize MIME types
+mimetypes.init()
+
 # --- Обработчики команд ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -129,6 +132,12 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 elif ext == '.tex':
                     return 'application/x-tex'
                 else:
+                    # Additional fallback to mimetypes module
+                    guess = mimetypes.guess_type(file_path)[0]
+                    if guess:
+                        logging.info(f"Mimetype module guessed: {guess} for {file_path}")
+                        return guess
+                    logging.warning(f"Could not determine MIME type for {file_path}, using default")
                     return 'application/octet-stream'
 
         # Запускаем пайплайн анализа
@@ -211,14 +220,15 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if os.path.exists(pdf_path):
                     try:
                         logger.info(f"Attempting to send PDF: {pdf_path}")
-                        # Use proper MIME type for PDF
+                        # Get MIME type for PDF
                         mime_type = get_mime_type(pdf_path)
                         logger.info(f"Detected MIME type for PDF: {mime_type}")
                         
                         with open(pdf_path, 'rb') as pdf_file:
+                            pdf_bytes = pdf_file.read()  # Read file into memory
                             await context.bot.send_document(
                                 chat_id=chat_id, 
-                                document=InputFile(pdf_file, filename=os.path.basename(pdf_path)),
+                                document=InputFile(pdf_bytes, filename=os.path.basename(pdf_path)),
                                 caption="Анализ UI (PDF)"
                             )
                         logger.info(f"Отправлен PDF: {pdf_path}")
@@ -258,9 +268,10 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         
                         # Try sending as photo first
                         with open(heatmap_path, 'rb') as img_file:
+                            img_bytes = img_file.read()  # Read file into memory
                             await context.bot.send_photo(
                                 chat_id=chat_id, 
-                                photo=InputFile(img_file, filename=os.path.basename(heatmap_path)),
+                                photo=InputFile(img_bytes, filename=os.path.basename(heatmap_path)),
                                 caption="Тепловая карта проблемных зон"
                             )
                         logger.info(f"Heatmap sent successfully as photo")
@@ -270,9 +281,10 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         try:
                             # Fallback to document if photo fails
                             with open(heatmap_path, 'rb') as img_file:
+                                img_bytes = img_file.read()  # Read file into memory
                                 await context.bot.send_document(
                                     chat_id=chat_id, 
-                                    document=InputFile(img_file, filename=os.path.basename(heatmap_path)),
+                                    document=InputFile(img_bytes, filename=os.path.basename(heatmap_path)),
                                     caption="Тепловая карта проблемных зон (файл)"
                                 )
                             logger.info(f"Отправлена тепловая карта как документ: {heatmap_path}")
@@ -296,9 +308,10 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         logger.info(f"Attempting to send Interpretation JSON file: {interp_path}")
                         
                         with open(interp_path, 'rb') as json_file:
+                            json_bytes = json_file.read()  # Read file into memory
                             await context.bot.send_document(
                                 chat_id=chat_id, 
-                                document=InputFile(json_file, filename=os.path.basename(interp_path)),
+                                document=InputFile(json_bytes, filename=os.path.basename(interp_path)),
                                 caption="Стратегическая интерпретация (JSON)"
                             )
                         logger.info(f"Отправлен файл интерпретации: {interp_path}")
@@ -322,9 +335,10 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         logger.info(f"Attempting to send Recommendations JSON file: {rec_path}")
                         
                         with open(rec_path, 'rb') as json_file:
+                            json_bytes = json_file.read()  # Read file into memory
                             await context.bot.send_document(
                                 chat_id=chat_id, 
-                                document=InputFile(json_file, filename=os.path.basename(rec_path)),
+                                document=InputFile(json_bytes, filename=os.path.basename(rec_path)),
                                 caption="Стратегические рекомендации (JSON)"
                             )
                         logger.info(f"Отправлен файл рекомендаций: {rec_path}")
@@ -350,9 +364,10 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             logger.info(f"Attempting to send Fallback TeX file: {tex_path}")
                             
                             with open(tex_path, 'rb') as tex_file:
+                                tex_bytes = tex_file.read()  # Read file into memory
                                 await context.bot.send_document(
                                     chat_id=chat_id, 
-                                    document=InputFile(tex_file, filename=os.path.basename(tex_path)),
+                                    document=InputFile(tex_bytes, filename=os.path.basename(tex_path)),
                                     caption="Отчет анализа (TeX файл)"
                                 )
                             logger.info(f"Отправлен LaTeX отчет (.tex): {tex_path}")
