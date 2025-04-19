@@ -8,11 +8,16 @@ import shutil
 import asyncio
 import sys
 import mimetypes
+import magic  # New import for detecting MIME types
 import telegram
 from telegram import Update, InputFile
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from dotenv import load_dotenv
 import json
+import glob
+from pathlib import Path
+import traceback
+from datetime import datetime
 
 # Загрузка переменных окружения (токен бота)
 load_dotenv()
@@ -102,6 +107,30 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await message.reply_text("Произошла ошибка при сохранении изображения. Попробуйте еще раз.")
             return
 
+        # Helper function to detect MIME type
+        def get_mime_type(file_path):
+            """Determine the correct MIME type for a file."""
+            try:
+                # Use python-magic to detect the MIME type
+                mime = magic.Magic(mime=True)
+                mime_type = mime.from_file(file_path)
+                logging.info(f"Detected MIME type for {file_path}: {mime_type}")
+                return mime_type
+            except Exception as e:
+                logging.warning(f"Failed to detect MIME type using magic: {e}")
+                # Fallback to extension-based detection
+                ext = os.path.splitext(file_path)[1].lower()
+                if ext == '.pdf':
+                    return 'application/pdf'
+                elif ext in ('.png', '.jpg', '.jpeg'):
+                    return 'image/png' if ext == '.png' else 'image/jpeg'
+                elif ext == '.json':
+                    return 'application/json'
+                elif ext == '.tex':
+                    return 'application/x-tex'
+                else:
+                    return 'application/octet-stream'
+
         # Запускаем пайплайн анализа
         try:
             # Check if pipeline script exists
@@ -179,61 +208,99 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # --- Sending PDF --- 
             if pdf_path:
                 logger.info(f"Checking existence of PDF: {pdf_path}")
-                pdf_exists = os.path.exists(pdf_path)
-                pdf_size = os.path.getsize(pdf_path) if pdf_exists else 0
-                logger.info(f"PDF exists: {pdf_exists}, Size: {pdf_size} bytes")
-                if pdf_exists and pdf_size > 0:
+                if os.path.exists(pdf_path):
                     try:
                         logger.info(f"Attempting to send PDF: {pdf_path}")
-                        await context.bot.send_document(chat_id=chat_id, document=InputFile(pdf_path), filename=os.path.basename(pdf_path))
+                        # Use proper MIME type for PDF
+                        mime_type = get_mime_type(pdf_path)
+                        logger.info(f"Detected MIME type for PDF: {mime_type}")
+                        
+                        with open(pdf_path, 'rb') as pdf_file:
+                            await context.bot.send_document(
+                                chat_id=chat_id, 
+                                document=InputFile(pdf_file, filename=os.path.basename(pdf_path)),
+                                caption="Анализ UI (PDF)"
+                            )
                         logger.info(f"Отправлен PDF: {pdf_path}")
                         results_sent = True
                     except Exception as e:
                         logger.error(f"Не удалось отправить PDF {pdf_path}: {e}")
                         try:
-                            await message.reply_text(f"Не удалось отправить PDF отчет.") # Simplified error
-                        except Exception as reply_e:
-                            logger.error(f"Failed to send error reply for PDF: {reply_e}")
+                            # Try simplified approach
+                            with open(pdf_path, 'rb') as pdf_file:
+                                await context.bot.send_document(
+                                    chat_id=chat_id,
+                                    document=pdf_file,
+                                    filename=os.path.basename(pdf_path),
+                                    caption="Анализ UI (PDF) - резервный метод"
+                                )
+                            logger.info(f"PDF отправлен резервным методом: {pdf_path}")
+                            results_sent = True
+                        except Exception as e2:
+                            logger.error(f"Не удалось отправить PDF резервным методом: {e2}")
+                            try:
+                                await message.reply_text(f"Не удалось отправить PDF отчет.") 
+                            except Exception as reply_e:
+                                logger.error(f"Failed to send error reply for PDF: {reply_e}")
                 else:
-                     logger.warning(f"PDF file path found in stdout, but file does not exist at: {pdf_path} or is empty.") # Added empty check info
+                    logger.warning(f"PDF file path found in stdout, but file does not exist at: {pdf_path}")
             else:
-                 logger.info("No PDF path found in stdout.")
+                logger.info("No PDF path found in stdout.")
 
             # --- Sending Heatmap --- 
             if heatmap_path:
                 logger.info(f"Checking existence of Heatmap: {heatmap_path}")
-                heatmap_exists = os.path.exists(heatmap_path)
-                heatmap_size = os.path.getsize(heatmap_path) if heatmap_exists else 0
-                heatmap_size_mb = heatmap_size / (1024 * 1024)
-                logger.info(f"Heatmap exists: {heatmap_exists}, Size: {heatmap_size} bytes ({heatmap_size_mb:.2f} MB)")
-                if heatmap_exists and heatmap_size > 0:
-                    # Send as document to avoid Image_process_failed
+                heatmap_size_mb = os.path.getsize(heatmap_path) / (1024 * 1024) if os.path.exists(heatmap_path) else 0
+                logger.info(f"Heatmap file size: {heatmap_size_mb:.2f} MB")
+                if os.path.exists(heatmap_path):
                     try:
-                        logger.info(f"Attempting to send Heatmap as document: {heatmap_path}")
-                        await context.bot.send_document(chat_id=chat_id, document=InputFile(heatmap_path), filename=os.path.basename(heatmap_path), caption="Тепловая карта проблемных зон (файл)")
-                        logger.info(f"Отправлена тепловая карта: {heatmap_path}")
+                        logger.info(f"Attempting to send Heatmap as photo: {heatmap_path}")
+                        
+                        # Try sending as photo first
+                        with open(heatmap_path, 'rb') as img_file:
+                            await context.bot.send_photo(
+                                chat_id=chat_id, 
+                                photo=InputFile(img_file, filename=os.path.basename(heatmap_path)),
+                                caption="Тепловая карта проблемных зон"
+                            )
+                        logger.info(f"Heatmap sent successfully as photo")
                         results_sent = True
-                    except Exception as e:
-                        logger.error(f"Не удалось отправить тепловую карту {heatmap_path}: {e}")
+                    except Exception as photo_e:
+                        logger.warning(f"Could not send heatmap as photo: {photo_e}, trying as document")
                         try:
-                            await message.reply_text(f"Не удалось отправить тепловую карту.") # Simplified error
-                        except Exception as reply_e:
-                            logger.error(f"Failed to send error reply for Heatmap: {reply_e}")
+                            # Fallback to document if photo fails
+                            with open(heatmap_path, 'rb') as img_file:
+                                await context.bot.send_document(
+                                    chat_id=chat_id, 
+                                    document=InputFile(img_file, filename=os.path.basename(heatmap_path)),
+                                    caption="Тепловая карта проблемных зон (файл)"
+                                )
+                            logger.info(f"Отправлена тепловая карта как документ: {heatmap_path}")
+                            results_sent = True
+                        except Exception as e:
+                            logger.error(f"Не удалось отправить тепловую карту как документ: {e}")
+                            try:
+                                await message.reply_text(f"Не удалось отправить тепловую карту.")
+                            except Exception as reply_e:
+                                logger.error(f"Failed to send error reply for Heatmap: {reply_e}")
                 else:
-                     logger.warning(f"Heatmap file path found in stdout, but file does not exist at: {heatmap_path} or is empty.")
+                    logger.warning(f"Heatmap file path found in stdout, but file does not exist at: {heatmap_path}")
             else:
-                 logger.info("No Heatmap path found in stdout.")
+                logger.info("No Heatmap path found in stdout.")
 
             # --- Sending Interpretation JSON file --- 
             if interp_path:
                 logger.info(f"Checking existence of Interpretation JSON: {interp_path}")
-                interp_exists = os.path.exists(interp_path)
-                interp_size = os.path.getsize(interp_path) if interp_exists else 0
-                logger.info(f"Interpretation JSON exists: {interp_exists}, Size: {interp_size} bytes")
-                if interp_exists and interp_size > 0:
+                if os.path.exists(interp_path):
                     try:
                         logger.info(f"Attempting to send Interpretation JSON file: {interp_path}")
-                        await context.bot.send_document(chat_id=chat_id, document=InputFile(interp_path), filename=os.path.basename(interp_path))
+                        
+                        with open(interp_path, 'rb') as json_file:
+                            await context.bot.send_document(
+                                chat_id=chat_id, 
+                                document=InputFile(json_file, filename=os.path.basename(interp_path)),
+                                caption="Стратегическая интерпретация (JSON)"
+                            )
                         logger.info(f"Отправлен файл интерпретации: {interp_path}")
                         results_sent = True
                     except Exception as e:
@@ -243,20 +310,23 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         except Exception as reply_e:
                             logger.error(f"Failed to send error reply for Interpretation JSON: {reply_e}")
                 else:
-                    logger.warning(f"Interpretation JSON path found in stdout, but file does not exist at: {interp_path} or is empty.")
+                    logger.warning(f"Interpretation JSON path found in stdout, but file does not exist at: {interp_path}")
             else:
                 logger.info("No Interpretation JSON path found in stdout.")
 
             # --- Sending Recommendations JSON file --- 
             if rec_path:
                 logger.info(f"Checking existence of Recommendations JSON: {rec_path}")
-                rec_exists = os.path.exists(rec_path)
-                rec_size = os.path.getsize(rec_path) if rec_exists else 0
-                logger.info(f"Recommendations JSON exists: {rec_exists}, Size: {rec_size} bytes")
-                if rec_exists and rec_size > 0:
+                if os.path.exists(rec_path):
                     try:
                         logger.info(f"Attempting to send Recommendations JSON file: {rec_path}")
-                        await context.bot.send_document(chat_id=chat_id, document=InputFile(rec_path), filename=os.path.basename(rec_path))
+                        
+                        with open(rec_path, 'rb') as json_file:
+                            await context.bot.send_document(
+                                chat_id=chat_id, 
+                                document=InputFile(json_file, filename=os.path.basename(rec_path)),
+                                caption="Стратегические рекомендации (JSON)"
+                            )
                         logger.info(f"Отправлен файл рекомендаций: {rec_path}")
                         results_sent = True
                     except Exception as e:
@@ -266,22 +336,25 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         except Exception as reply_e:
                             logger.error(f"Failed to send error reply for Recommendations JSON: {reply_e}")
                 else:
-                    logger.warning(f"Recommendations JSON path found in stdout, but file does not exist at: {rec_path} or is empty.")
+                    logger.warning(f"Recommendations JSON path found in stdout, but file does not exist at: {rec_path}")
             else:
                 logger.info("No Recommendations JSON path found in stdout.")
 
             # --- Fallback Sending TeX file --- 
-            if not pdf_path_match: # Only if PDF path wasn't found or didn't exist
+            if not pdf_path or not os.path.exists(pdf_path): # Only if PDF path wasn't found or file doesn't exist
                 logger.info("PDF path missing or file not found, attempting fallback to TeX file.")
                 if tex_path:
                     logger.info(f"Checking existence of Fallback TeX: {tex_path}")
-                    tex_exists = os.path.exists(tex_path)
-                    tex_size = os.path.getsize(tex_path) if tex_exists else 0
-                    logger.info(f"Fallback TeX exists: {tex_exists}, Size: {tex_size} bytes")
-                    if tex_exists and tex_size > 0:
+                    if os.path.exists(tex_path):
                         try:
                             logger.info(f"Attempting to send Fallback TeX file: {tex_path}")
-                            await context.bot.send_document(chat_id=chat_id, document=InputFile(tex_path), filename=os.path.basename(tex_path))
+                            
+                            with open(tex_path, 'rb') as tex_file:
+                                await context.bot.send_document(
+                                    chat_id=chat_id, 
+                                    document=InputFile(tex_file, filename=os.path.basename(tex_path)),
+                                    caption="Отчет анализа (TeX файл)"
+                                )
                             logger.info(f"Отправлен LaTeX отчет (.tex): {tex_path}")
                             results_sent = True
                         except Exception as e:
@@ -291,75 +364,55 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             except Exception as reply_e:
                                 logger.error(f"Failed to send error reply for Fallback TeX: {reply_e}")
                     else:
-                         logger.warning(f"Fallback TeX path found in stdout, but file does not exist at: {tex_path} or is empty.")
+                        logger.warning(f"Fallback TeX path found in stdout, but file does not exist at: {tex_path}")
                 else:
-                     logger.info("No Fallback TeX path found in stdout.")
+                    logger.info("No Fallback TeX path found in stdout.")
 
             # --- Sending Interpretation Text --- 
-            if interp_path:
-                logger.info(f"Checking existence of Interpretation JSON for inline text: {interp_path}")
-                interp_exists = os.path.exists(interp_path)
-                interp_size = os.path.getsize(interp_path) if interp_exists else 0
-                logger.info(f"Interpretation JSON (for text) exists: {interp_exists}, Size: {interp_size} bytes")
-                if interp_exists and interp_size > 0:
-                    try:
-                        logger.info(f"Attempting to read and send Interpretation text: {interp_path}")
-                        with open(interp_path, 'r', encoding='utf-8') as f:
-                            interp_data = json.load(f) # Load as JSON to potentially format later
-                        # Send raw JSON for now, can format later if needed
-                        interp_text = json.dumps(interp_data, indent=2, ensure_ascii=False)
-                        # Split into chunks if too long
-                        MAX_MSG_LEN = 4000
-                        text_chunks = [interp_text[i:i+MAX_MSG_LEN] for i in range(0, len(interp_text), MAX_MSG_LEN)]
-                        for chunk in text_chunks:
-                            await message.reply_text(f"📄 Интерпретация (часть):\n```json\n{chunk}\n```", parse_mode="Markdown")
-                        results_sent = True # Mark as sent even if only text is sent
-                    except telegram.error.BadRequest as e:
-                       logger.error(f"Error sending interpretation text (possibly Markdown issue): {e}")
-                    except Exception as e:
-                       logger.error(f"Не удалось отправить текст интерпретации {interp_path}: {e}")
-                else:
-                     logger.warning(f"Interpretation JSON path found in stdout, but file does not exist at: {interp_path} or is empty. (for text sending)") # Added empty info
-            else:
-                 logger.info("No Interpretation JSON path found in stdout (for text sending).")
+            if interp_path and os.path.exists(interp_path):
+                try:
+                    logger.info(f"Attempting to read and send Interpretation text: {interp_path}")
+                    with open(interp_path, 'r', encoding='utf-8') as f:
+                        interp_data = json.load(f) # Load as JSON to potentially format later
+                    # Send raw JSON for now, can format later if needed
+                    interp_text = json.dumps(interp_data, indent=2, ensure_ascii=False)
+                    # Split into chunks if too long
+                    MAX_MSG_LEN = 4000
+                    text_chunks = [interp_text[i:i+MAX_MSG_LEN] for i in range(0, len(interp_text), MAX_MSG_LEN)]
+                    for chunk in text_chunks:
+                        await message.reply_text(f"📄 Интерпретация (часть):\n```json\n{chunk}\n```", parse_mode="Markdown")
+                    results_sent = True # Mark as sent even if only text is sent
+                except telegram.error.BadRequest as e:
+                    logger.error(f"Error sending interpretation text (possibly Markdown issue): {e}")
+                except Exception as e:
+                    logger.error(f"Не удалось отправить текст интерпретации {interp_path}: {e}")
 
             # --- Sending Recommendations Text --- 
-            if rec_path:
-                logger.info(f"Checking existence of Recommendations JSON for inline text: {rec_path}")
-                rec_exists = os.path.exists(rec_path)
-                rec_size = os.path.getsize(rec_path) if rec_exists else 0
-                logger.info(f"Recommendations JSON (for text) exists: {rec_exists}, Size: {rec_size} bytes")
-                if rec_exists and rec_size > 0:
-                    try:
-                        logger.info(f"Attempting to read and send Recommendations text: {rec_path}")
-                        with open(rec_path, 'r', encoding='utf-8') as f:
-                            rec_data = json.load(f) # Load as JSON
-                        rec_text = json.dumps(rec_data, indent=2, ensure_ascii=False)
-                        text_chunks = [rec_text[i:i+MAX_MSG_LEN] for i in range(0, len(rec_text), MAX_MSG_LEN)]
-                        for chunk in text_chunks:
-                            await message.reply_text(f"💡 Рекомендации (часть):\n```json\n{chunk}\n```", parse_mode="Markdown")
-                        results_sent = True
-                    except telegram.error.BadRequest as e:
-                       logger.error(f"Error sending recommendations text (possibly Markdown issue): {e}")
-                    except Exception as e:
-                       logger.error(f"Не удалось отправить текст рекомендаций {rec_path}: {e}")
-                else:
-                     logger.warning(f"Recommendations JSON path found in stdout, but file does not exist at: {rec_path} or is empty. (for text sending)")
-            else:
-                 logger.info("No Recommendations JSON path found in stdout (for text sending).")
+            if rec_path and os.path.exists(rec_path):
+                try:
+                    logger.info(f"Attempting to read and send Recommendations text: {rec_path}")
+                    with open(rec_path, 'r', encoding='utf-8') as f:
+                        rec_data = json.load(f) # Load as JSON
+                    rec_text = json.dumps(rec_data, indent=2, ensure_ascii=False)
+                    text_chunks = [rec_text[i:i+MAX_MSG_LEN] for i in range(0, len(rec_text), MAX_MSG_LEN)]
+                    for chunk in text_chunks:
+                        await message.reply_text(f"💡 Рекомендации (часть):\n```json\n{chunk}\n```", parse_mode="Markdown")
+                    results_sent = True
+                except telegram.error.BadRequest as e:
+                    logger.error(f"Error sending recommendations text (possibly Markdown issue): {e}")
+                except Exception as e:
+                    logger.error(f"Не удалось отправить текст рекомендаций {rec_path}: {e}")
 
             if not results_sent:
+                # If after all attempts nothing was sent, inform the user
                 logger.warning("No results were successfully sent to the user.")
-                try:
-                     await message.reply_text("Не удалось найти или отправить файлы результатов после анализа.")
-                except Exception as reply_e:
-                     logger.error(f"Failed to send final error message: {reply_e}")
+                await message.reply_text("Не удалось найти или отправить файлы результатов после анализа.")
 
             # Очистка: удаляем папку с результатами
             if output_dir and os.path.exists(output_dir) and output_dir.startswith("analysis_outputs/"):
                 try:
-                    output_dir_abs = os.path.join(SCRIPT_DIR, output_dir) # Use absolute path for rmtree
-                    logger.info(f"Attempting cleanup of results directory: {output_dir_abs}")
+                    # Use absolute path for safety? Though relative should work if bot CWD is /app
+                    # output_dir_abs = os.path.join(SCRIPT_DIR, output_dir) # If needed
                     shutil.rmtree(output_dir)
                     logger.info(f"Удалена директория с результатами: {output_dir}")
                 except Exception as e:
