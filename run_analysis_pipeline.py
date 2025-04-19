@@ -32,7 +32,18 @@ if not os.path.exists(GENERATE_REPORT_SCRIPT):
 DEFAULT_GPT_PROMPT = os.path.join(SCRIPT_DIR, 'tests', 'gpt_full_prompt.txt') # Corrected path to tests/
 DEFAULT_INTERPRETATION_PROMPT = os.path.join(SCRIPT_DIR, 'gemini_interpretation_prompt.md')
 DEFAULT_RECOMMENDATIONS_PROMPT = os.path.join(SCRIPT_DIR, 'gemini_recommendations_only_prompt.md')
-DEFAULT_COORDS_PROMPT = os.path.join(SCRIPT_DIR, 'gemini_simple_prompt.md') # Assuming this is the coords prompt
+DEFAULT_COORDS_PROMPT = os.path.join(SCRIPT_DIR, 'gemini_simple_prompt.md')
+
+# Ensure Gemini simple prompt exists
+if not os.path.exists(DEFAULT_COORDS_PROMPT):
+    print(f"!!! Предупреждение: Gemini простой промпт не найден: {DEFAULT_COORDS_PROMPT}")
+    # Try to find it in the tests directory
+    alt_coords_prompt = os.path.join(SCRIPT_DIR, 'tests', 'gemini_simple_prompt.md')
+    if os.path.exists(alt_coords_prompt):
+        print(f"Найден альтернативный Gemini промпт: {alt_coords_prompt}")
+        DEFAULT_COORDS_PROMPT = alt_coords_prompt
+    else:
+        print(f"!!! Предупреждение: Альтернативный промпт тоже не найден !!!")
 
 # --- Helper Functions ---
 
@@ -163,7 +174,16 @@ def run_pipeline(image_path):
                 
                 if not os.path.exists(DEFAULT_COORDS_PROMPT):
                      print(f"!!! Ошибка: Файл Gemini координат промпта не найден: {DEFAULT_COORDS_PROMPT} !!!")
-                     raise FileNotFoundError(f"Coords prompt file not found: {DEFAULT_COORDS_PROMPT}")
+                     # Try to create a default simple prompt
+                     try:
+                         simple_prompt = """You are a specialized visual analysis system designed to extract precise coordinates for identified UI usability issues in images. Your task is to locate specific problematic elements and provide their bounding box coordinates using a normalized coordinate system."""
+                         os.makedirs(os.path.dirname(DEFAULT_COORDS_PROMPT), exist_ok=True)
+                         with open(DEFAULT_COORDS_PROMPT, 'w') as f:
+                             f.write(simple_prompt)
+                         print(f"Создан стандартный промпт в: {DEFAULT_COORDS_PROMPT}")
+                     except Exception as e:
+                         print(f"Не удалось создать стандартный промпт: {e}")
+                         raise FileNotFoundError(f"Coords prompt file not found and couldn't create default: {DEFAULT_COORDS_PROMPT}")
                      
                 from api_test import run_gemini_coordinates # Corrected function name
                 
@@ -179,8 +199,15 @@ def run_pipeline(image_path):
                     output_parsed_json_path=gemini_coords_parsed_output
                 )
                 if not coords_result_data:
-                    print("!!! Предупреждение: Gemini Координаты не были получены; продолжаю без координат и тепловой карты !!!")
-                    pipeline_error_details += "Gemini Coordinates failed; continuing without coordinates.\n"
+                    print("!!! Предупреждение: Gemini Координаты не были получены; создаю пустую структуру !!!")
+                    # Create an empty coordinates structure 
+                    coords_result_data = {"element_coordinates": []}
+                    # Save empty structure
+                    os.makedirs(os.path.dirname(gemini_coords_parsed_output), exist_ok=True)
+                    with open(gemini_coords_parsed_output, 'w') as f:
+                        json.dump(coords_result_data, f)
+                    print(f"Создана пустая структура координат: {gemini_coords_parsed_output}")
+                    pipeline_error_details += "Gemini Coordinates failed; created empty coordinates structure.\n"
                 else:
                     print(f"    Raw Gemini ответ сохранен в: {gemini_coords_raw_output}")
                     print(f"    Распарсенный Gemini ответ сохранен в: {gemini_coords_parsed_output}")
@@ -198,7 +225,7 @@ def run_pipeline(image_path):
                 pipeline_error_details += f"Error during api_test.py execution (for Coords): {e}\n"
 
         # --- 4. Generate Heatmap (Using api_test.py function) ---
-        if pipeline_success and os.path.exists(gemini_coords_parsed_output):
+        if pipeline_success: # Changed from checking gemini_coords_parsed_output exists
             print(f"--- Запуск Генерации Тепловой Карты для: {image_path} ---")
             print(f"    Сохранение в: {heatmap_output}")
             try:
@@ -213,9 +240,11 @@ def run_pipeline(image_path):
                 if 'gpt_result_data' not in locals() or gpt_result_data is None:
                     print("!!! Ошибка: Данные GPT анализа отсутствуют, невозможно запустить Генерацию Тепловой Карты !!!")
                     raise ValueError("Missing GPT analysis data for Heatmap Generation")
+                    
+                # If coords_result_data is not available, create an empty one
                 if 'coords_result_data' not in locals() or coords_result_data is None:
-                     print("!!! Ошибка: Данные координат отсутствуют, невозможно запустить Генерацию Тепловой Карты !!!")
-                     raise ValueError("Missing Coordinates data for Heatmap Generation")
+                     print("!!! Предупреждение: Данные координат отсутствуют, создаю пустую структуру !!!")
+                     coords_result_data = {"element_coordinates": []}
 
                 # Pass the loaded dictionary for gpt_result_data
                 # Pass the dictionary returned by run_gemini_coordinates for coordinates_data
@@ -225,23 +254,60 @@ def run_pipeline(image_path):
                     gpt_result_data=gpt_result_data, # Pass the loaded gpt dictionary
                     output_heatmap_path=heatmap_output
                 )
-                if not success:
-                    print("!!! Ошибка Генерации Тепловой Карты через api_test.py !!!")
-                    # pipeline_success = False # Maybe not critical
-                    pipeline_error_details += "Heatmap Generation failed.\n"
-                else:
+                
+                if success:
                     print(f"    Тепловая карта успешно сгенерирована и сохранена в: {heatmap_output}")
                     print("--- Успешно: Генерация Тепловой Карты ---")
+                else:
+                    print("!!! Ошибка: не удалось сгенерировать тепловую карту !!!")
+                    pipeline_error_details += "Heatmap generation failed.\n"
+                    # Try to create a basic placeholder image
+                    try:
+                        import matplotlib.pyplot as plt
+                        import numpy as np
+                        from PIL import Image
+                        
+                        # Create a simple placeholder
+                        plt.figure(figsize=(8, 6))
+                        plt.text(0.5, 0.5, "Heatmap generation failed", 
+                                ha='center', va='center', fontsize=20, color='red',
+                                bbox=dict(facecolor='white', alpha=0.8))
+                        plt.axis('off')
+                        os.makedirs(os.path.dirname(heatmap_output), exist_ok=True)
+                        plt.savefig(heatmap_output)
+                        plt.close()
+                        print(f"Создана заглушка тепловой карты в: {heatmap_output}")
+                    except Exception as e:
+                        print(f"Не удалось создать заглушку тепловой карты: {e}")
 
             except ImportError as e:
                 print(f"!!! Ошибка импорта функций из tests/api_test.py (для Тепловой Карты): {e} !!!")
                 pipeline_error_details += "Failed to import from api_test.py (for Heatmap).\n"
+                
+                # Try to create a fallback heatmap without importing the module
+                try:
+                    import matplotlib.pyplot as plt
+                    from PIL import Image
+                    
+                    # Create a simple heatmap message
+                    img = Image.open(image_path)
+                    plt.figure(figsize=(img.width/100, img.height/100), dpi=100)
+                    plt.imshow(np.array(img))
+                    plt.text(img.width/2, img.height/2, "Ошибка импорта модуля для тепловой карты", 
+                            ha='center', va='center', fontsize=20, color='red',
+                            bbox=dict(facecolor='white', alpha=0.8))
+                    plt.axis('off')
+                    os.makedirs(os.path.dirname(heatmap_output), exist_ok=True)
+                    plt.savefig(heatmap_output)
+                    plt.close()
+                    print(f"Создана заглушка тепловой карты в: {heatmap_output}")
+                except Exception as e2:
+                    print(f"Не удалось создать заглушку тепловой карты: {e2}")
+            
             except Exception as e:
                 print(f"!!! Ошибка при вызове функции из api_test.py (для Тепловой Карты): {e} !!!")
-                traceback.print_exc()
                 pipeline_error_details += f"Error during api_test.py execution (for Heatmap): {e}\n"
-        elif pipeline_success: # Only print skip message if coords step was attempted but failed/skipped
-            print("--- Пропуск Генерации Тепловой Карты (нет файла координат) --- ")
+                traceback.print_exc()
 
         # --- 5. Run Gemini Interpretation --- (Uses get_gemini_recommendations.py script)
         if pipeline_success and os.path.exists(gpt_analysis_output):

@@ -406,18 +406,90 @@ def run_gemini_coordinates(image_path, gpt_result_data, output_raw_json_path, ou
         except Exception as e:
             print(f"    !!! Ошибка сохранения raw Gemini JSON в {output_raw_json_path}: {e} !!!")
 
-        # Parse JSON response
+        # Parse JSON response - IMPROVED PARSING LOGIC
         try:
-            # Clean potential markdown fences
-            if "```json" in response_text:
-                json_str = response_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in response_text and response_text.strip().startswith("```"):
-                 json_str = response_text.split("```")[1].split("```")[0].strip()
-            else:
-                 json_str = response_text.strip() # Assume it's just JSON
-
-            coordinates_data = json.loads(json_str)
-            assert "element_coordinates" in coordinates_data, "Отсутствует ключ 'element_coordinates' в ответе Gemini"
+            # Get raw text without any markdown or formatting
+            raw_text = response_text.strip()
+            
+            # Look for JSON content with multiple extraction methods
+            json_str = None
+            
+            # Method 1: Extract from markdown code blocks
+            if "```json" in raw_text:
+                json_str = raw_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in raw_text:
+                # Try to find any code block
+                parts = raw_text.split("```")
+                if len(parts) >= 3:  # At least one complete code block
+                    json_str = parts[1].strip()
+            
+            # Method 2: Find JSON by brackets if method 1 failed
+            if not json_str:
+                # Try to extract JSON using bracket matching
+                start_idx = raw_text.find('{')
+                if start_idx != -1:
+                    # Find matching end bracket
+                    bracket_count = 0
+                    for i in range(start_idx, len(raw_text)):
+                        if raw_text[i] == '{':
+                            bracket_count += 1
+                        elif raw_text[i] == '}':
+                            bracket_count -= 1
+                            if bracket_count == 0:
+                                # Found matching bracket
+                                json_str = raw_text[start_idx:i+1]
+                                break
+            
+            # If still no JSON found, use the whole text as a last resort
+            if not json_str:
+                print("    !!! Предупреждение: не удалось выделить JSON из ответа. Используем весь текст !!!")
+                json_str = raw_text
+            
+            # Check if the extracted text looks like JSON before trying to parse
+            if not (json_str.startswith('{') and json_str.endswith('}')):
+                print(f"    !!! Предупреждение: извлеченный текст не похож на JSON: {json_str[:100]}... !!!")
+            
+            # Try to parse with improved error handling
+            try:
+                coordinates_data = json.loads(json_str)
+            except json.JSONDecodeError as e:
+                print(f"    !!! Ошибка парсинга JSON: {e} !!!")
+                print(f"    Проблемная строка: {e.doc[max(0, e.pos-30):min(len(e.doc), e.pos+30)]}")
+                
+                # Last resort: try to clean the string and parse again
+                clean_json_str = json_str.replace('\n', ' ').replace('\r', '')
+                # Remove any non-JSON characters at the beginning or end
+                while clean_json_str and not clean_json_str.startswith('{'):
+                    clean_json_str = clean_json_str[1:]
+                while clean_json_str and not clean_json_str.endswith('}'):
+                    clean_json_str = clean_json_str[:-1]
+                    
+                if clean_json_str and clean_json_str.startswith('{') and clean_json_str.endswith('}'):
+                    print("    Attempting to parse cleaned JSON string...")
+                    coordinates_data = json.loads(clean_json_str)
+                else:
+                    print("    !!! Не удалось очистить JSON строку !!!")
+                    raise
+            
+            # Validate required keys
+            if "element_coordinates" not in coordinates_data:
+                print("    !!! Предупреждение: ответ не содержит ключ 'element_coordinates' !!!")
+                # Try to fix the structure if possible
+                if isinstance(coordinates_data, list):
+                    # Wrap list in the expected structure
+                    coordinates_data = {"element_coordinates": coordinates_data}
+                    print("    Исправлена структура JSON: обернут список в 'element_coordinates'")
+                else:
+                    # Look for any key that might contain a list of elements
+                    for key, value in coordinates_data.items():
+                        if isinstance(value, list) and value and isinstance(value[0], dict):
+                            coordinates_data = {"element_coordinates": value}
+                            print(f"    Исправлена структура JSON: использован ключ '{key}' как 'element_coordinates'")
+                            break
+                    else:
+                        # If we still have no element_coordinates, create an empty list
+                        coordinates_data = {"element_coordinates": []}
+                        print("    !!! Не удалось найти координаты в ответе, создан пустой список !!!")
 
             # Save parsed response
             os.makedirs(os.path.dirname(output_parsed_json_path), exist_ok=True)
@@ -428,11 +500,11 @@ def run_gemini_coordinates(image_path, gpt_result_data, output_raw_json_path, ou
             # Prepare data structure for heatmap function
             valid_elements = [
                 {
-                    "id": elem["id"],
+                    "id": elem.get("id", f"unknown_{i}"),
                     "type": "problem_area", # Consistent type
-                    "name": elem["element"],
-                    "coordinates": elem["coordinates"] # Keep normalized coords
-                } for elem in coordinates_data["element_coordinates"]
+                    "name": elem.get("element", "Unknown element"),
+                    "coordinates": elem.get("coordinates") # Keep normalized coords
+                } for i, elem in enumerate(coordinates_data["element_coordinates"])
                   if elem.get("coordinates") is not None # Filter nulls here
             ]
             element_coordinates_for_heatmap = { "element_coordinates": valid_elements }
@@ -440,19 +512,20 @@ def run_gemini_coordinates(image_path, gpt_result_data, output_raw_json_path, ou
             print(f"    Успешно обработан ответ Gemini. Найдено {len(valid_elements)} валидных координат.")
             print(f"--- Успешно: Gemini Координаты ---")
             return element_coordinates_for_heatmap
-
-        except json.JSONDecodeError:
-            print("    !!! Ошибка парсинга JSON ответа от Gemini. !!!")
-            print("    Raw response text:")
-            print(response_text[:1000] + "...") # Print first 1000 chars
-            return None
-        except AssertionError as e:
-             print(f"    !!! Ошибка валидации JSON ответа Gemini: {e} !!!")
-             return None
+        
         except Exception as e:
-             print(f"    !!! Ошибка сохранения распарсенного Gemini JSON в {output_parsed_json_path}: {e} !!!")
-             # Decide if this is fatal, maybe return the data anyway?
-             return None # Treat as fatal for now
+            print(f"    !!! Ошибка при обработке ответа Gemini: {e} !!!")
+            traceback.print_exc()
+            # Create a fallback empty coordinates structure
+            fallback_coords = {"element_coordinates": []}
+            try:
+                with open(output_parsed_json_path, "w", encoding="utf-8") as f:
+                    json.dump(fallback_coords, f, indent=2)
+                print(f"    Создан пустой файл координат из-за ошибки: {output_parsed_json_path}")
+            except Exception as save_e:
+                print(f"    !!! Не удалось сохранить пустой файл координат: {save_e} !!!")
+            
+            return fallback_coords
 
     except FileNotFoundError as e:
         print(f"    !!! Ошибка: Файл изображения не найден: {e} !!!")
@@ -464,117 +537,182 @@ def run_gemini_coordinates(image_path, gpt_result_data, output_raw_json_path, ou
 
 # --- Refactored Heatmap Generation Function ---
 def generate_heatmap(image_path, coordinates_data, gpt_result_data, output_heatmap_path):
-    """Generates a heatmap visualization and saves it."""
-    print(f"--- Запуск Генерации Тепловой Карты для: {image_path} ---")
-    print(f"    Сохранение в: {output_heatmap_path}")
-
-    # Check prerequisites
-    if not coordinates_data or "element_coordinates" not in coordinates_data or not coordinates_data["element_coordinates"]:
-        print("    Предупреждение: Нет данных координат для генерации тепловой карты.")
-        return False # Cannot generate heatmap without coordinates
-
-    if not gpt_result_data or "problemAreas" not in gpt_result_data:
-        print("    Предупреждение: Нет данных GPT анализа ('problemAreas') для определения severity. Будет использовано значение по умолчанию (50).")
-        problem_areas_map = {} # Empty map, will use default severity
-    else:
-        problem_areas_map = {str(area["id"]): area.get("severity", 50)
-                             for area in gpt_result_data["problemAreas"]}
-
+    """
+    Generate a heatmap visualization of UI issues.
+    This function is enhanced to work with empty coordinates data.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from PIL import Image
+    import os
+    
     try:
-        # Load image
-        original_img = Image.open(image_path)
-        img_array = np.array(original_img)
-        height, width = img_array.shape[:2]
-        print(f"    Изображение загружено: {width}x{height}")
-
-        # Create heatmap array
-        heatmap = np.zeros((height, width), dtype=np.float64) # Use float64 for accumulation
-
-        element_count = len(coordinates_data["element_coordinates"])
-        print(f"    Обработка {element_count} элементов для тепловой карты...")
-
-        processed_count = 0
-        # Add gaussian for each coordinate set
-        for element in coordinates_data["element_coordinates"]:
-            coords_norm = element.get("coordinates")
-            if coords_norm is None: continue # Should already be filtered, but check
-
-            element_id_str = str(element.get("id")) if element.get("id") is not None else None
-            severity = problem_areas_map.get(element_id_str, 50) if element_id_str else 50
-
-            try:
-                # Denormalize coordinates (0-1000 -> pixels)
-                y_min_norm, x_min_norm, y_max_norm, x_max_norm = coords_norm
-                x1 = int(x_min_norm / 1000 * width)
-                y1 = int(y_min_norm / 1000 * height)
-                x2 = int(x_max_norm / 1000 * width)
-                y2 = int(y_max_norm / 1000 * height)
-
-                # Clamp to bounds and validate
-                x1 = max(0, min(x1, width - 1))
-                y1 = max(0, min(y1, height - 1))
-                x2 = max(0, min(x2, width - 1))
-                y2 = max(0, min(y2, height - 1))
-                if x1 >= x2 or y1 >= y2: continue # Skip invalid box
-
-                # Calculate center and sigma
-                center_x = (x1 + x2) // 2
-                center_y = (y1 + y2) // 2
-                size = max(x2 - x1, y2 - y1, 1) # Avoid size 0
-                sigma = max(size / 10, 3) # Minimum sigma 3px
-                sigma_sq = sigma ** 2
-
-                # Add gaussian influence weighted by severity squared
-                y, x = np.ogrid[:height, :width]
-                # Optimized calculation? Maybe not necessary unless very slow.
-                gaussian = np.exp(-(((x - center_x)**2 + (y - center_y)**2) / (2 * sigma_sq)))
-                heatmap += gaussian * (float(severity) ** 2) # Ensure severity is float
-                processed_count += 1
-
-            except (ValueError, TypeError) as e:
-                print(f"    Предупреждение: Ошибка обработки координат для элемента {element_id_str}: {coords_norm}. Ошибка: {e}. Пропуск.")
+        print(f"    Изображение загружено: {image_path}")
+        
+        # Make sure output directory exists
+        output_dir = os.path.dirname(output_heatmap_path)
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Load the original image and get dimensions
+        try:
+            img = Image.open(image_path)
+            width, height = img.size
+            print(f"    Изображение загружено: {width}x{height}")
+        except Exception as e:
+            print(f"    !!! Ошибка при загрузке изображения: {e} !!!")
+            # Create a blank image as fallback
+            width, height = 800, 600
+            img = Image.new('RGB', (width, height), color='white')
+            print(f"    Создано пустое изображение: {width}x{height}")
+        
+        # Get coordinates from the Gemini data
+        elements = coordinates_data.get("element_coordinates", [])
+        valid_count = len([e for e in elements if e.get("coordinates")])
+        
+        if valid_count == 0:
+            # No valid coordinates. Create a simple heatmap with a warning message
+            print(f"    !!! Предупреждение: нет валидных координат для тепловой карты. Создание пустой карты !!!")
+            
+            # Create a simple heatmap with text
+            plt.figure(figsize=(width/100, height/100), dpi=100)
+            plt.imshow(np.array(img))
+            
+            # Add text warning
+            plt.text(width/2, height/2, "Нет данных для тепловой карты", 
+                     color="red", fontsize=24, ha="center", va="center",
+                     bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.7))
+            
+            plt.axis('off')
+            plt.savefig(output_heatmap_path, bbox_inches='tight', pad_inches=0)
+            plt.close()
+            
+            print(f"    Создана пустая тепловая карта: {output_heatmap_path}")
+            return True
+        
+        # Process the elements with valid coordinates
+        print(f"    Обработка {valid_count} элементов для тепловой карты...")
+        
+        # Create a heatmap array
+        heatmap = np.zeros((height, width))
+        
+        added_gaussians = 0
+        for element in elements:
+            coords = element.get("coordinates")
+            if not coords or len(coords) != 4:
                 continue
-
-        print(f"    Добавлено {processed_count} гауссиан в тепловую карту.")
-
-        # Normalize heatmap only if it has values
-        if heatmap.max() > 1e-9: # Use a small threshold instead of == 0
-            # Clip extreme peaks for better visualization (e.g., 98th percentile)
-            upper_bound = np.percentile(heatmap[heatmap > 1e-9], 98)
-            clipped_heatmap = np.clip(heatmap, 0, upper_bound)
-            # Normalize clipped heatmap
-            heatmap_norm = (clipped_heatmap - clipped_heatmap.min()) / (clipped_heatmap.max() - clipped_heatmap.min() + 1e-9) # Add epsilon
-        else:
-            print("    Тепловая карта пуста, нормализация пропущена.")
-            heatmap_norm = heatmap # Keep it as zeros
-
-        # Create visualization
-        plt.figure(figsize=(width / 100, height / 100), dpi=150) # Use slightly higher DPI
-        plt.imshow(original_img)
-        plt.imshow(heatmap_norm, alpha=0.7, cmap='viridis')
-        plt.colorbar(label='Относительная критичность проблемы (Intensity)')
-        plt.title('Тепловая карта проблемных зон UI')
+                
+            # Extract coordinates - handle both formats
+            if isinstance(coords, list) and len(coords) == 4:
+                y_min, x_min, y_max, x_max = coords
+                
+                # Check if normalized (0-1000)
+                if all(0 <= c <= 1000 for c in coords):
+                    # Convert normalized coordinates to actual pixels
+                    y_min = int(y_min * height / 1000)
+                    x_min = int(x_min * width / 1000)
+                    y_max = int(y_max * height / 1000)
+                    x_max = int(x_max * width / 1000)
+            else:
+                # Skip invalid coordinates
+                continue
+            
+            # Additional validation
+            if y_min >= y_max or x_min >= x_max:
+                continue
+                
+            # Ensure coordinates are within image bounds
+            y_min = max(0, min(y_min, height-1))
+            x_min = max(0, min(x_min, width-1))
+            y_max = max(0, min(y_max, height-1))
+            x_max = max(0, min(x_max, width-1))
+            
+            # Find center point
+            center_y = (y_min + y_max) // 2
+            center_x = (x_min + x_max) // 2
+            
+            # Calculate sigma based on the size of the area
+            area_width = x_max - x_min
+            area_height = y_max - y_min
+            sigma = max(area_width, area_height) / 4
+            
+            # Get problem severity to scale the intensity
+            severity = 0.7  # Default if not found
+            problem_id = element.get("id")
+            if problem_id and gpt_result_data and "problemAreas" in gpt_result_data:
+                for problem in gpt_result_data["problemAreas"]:
+                    if str(problem.get("id")) == str(problem_id):
+                        # Convert severity to 0-1 scale
+                        severity = min(1.0, max(0.1, problem.get("severity", 70) / 100.0))
+                        break
+            
+            # Create a gaussian centered on this element
+            y, x = np.ogrid[:height, :width]
+            gaussian = np.exp(-(
+                ((x - center_x) ** 2) / (2 * sigma ** 2) + 
+                ((y - center_y) ** 2) / (2 * sigma ** 2)
+            )) * severity  # Scale by severity
+            
+            # Add to the heatmap
+            heatmap += gaussian
+            added_gaussians += 1
+        
+        print(f"    Добавлено {added_gaussians} гауссиан в тепловую карту.")
+        
+        # If no gaussians were added (e.g., all had invalid coordinates), create a simple overlay
+        if added_gaussians == 0:
+            plt.figure(figsize=(width/100, height/100), dpi=100)
+            plt.imshow(np.array(img))
+            plt.text(width/2, height/2, "Некорректные координаты элементов", 
+                     color="red", fontsize=24, ha="center", va="center",
+                     bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.7))
+            plt.axis('off')
+            plt.savefig(output_heatmap_path, bbox_inches='tight', pad_inches=0)
+            plt.close()
+            print(f"    Создана тепловая карта с предупреждением: {output_heatmap_path}")
+            return True
+        
+        # Normalize the heatmap
+        heatmap = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min() + 1e-8)
+        
+        # Create the visualization
+        plt.figure(figsize=(width/100, height/100), dpi=100)
+        
+        # Display the original image
+        plt.imshow(np.array(img))
+        
+        # Overlay the heatmap with a colormap
+        plt.imshow(heatmap, alpha=0.6, cmap='hot')
+        
+        # Remove axes
         plt.axis('off')
-
-        # Save directly to output path
-        os.makedirs(os.path.dirname(output_heatmap_path), exist_ok=True)
-        plt.savefig(output_heatmap_path, bbox_inches='tight', dpi=150) # Save final version
-        plt.close() # Close plot to free memory
-
+        
+        # Save the result
+        plt.savefig(output_heatmap_path, bbox_inches='tight', pad_inches=0)
+        plt.close()
+        
         print(f"    Тепловая карта успешно сгенерирована и сохранена в: {output_heatmap_path}")
-        print(f"--- Успешно: Генерация Тепловой Карты ---")
         return True
-
-    except FileNotFoundError as e:
-        print(f"    !!! Ошибка: Файл изображения не найден: {e} !!!")
-        return False
-    except ImportError:
-        print("    !!! Ошибка: Библиотеки Matplotlib/Numpy/Pillow не найдены. Пожалуйста, установите их. !!!")
-        return False
+        
     except Exception as e:
-        print(f"    !!! Неожиданная ошибка в generate_heatmap: {e} !!!")
+        print(f"    !!! Ошибка при генерации тепловой карты: {e} !!!")
         traceback.print_exc()
-        return False
+        
+        try:
+            # Fallback: Create a simple image with error message
+            img = Image.new('RGB', (800, 600), color='white')
+            plt.figure(figsize=(8, 6), dpi=100)
+            plt.imshow(np.array(img))
+            plt.text(400, 300, f"Ошибка при создании тепловой карты:\n{str(e)}", 
+                     color="red", fontsize=18, ha="center", va="center",
+                     bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.7))
+            plt.axis('off')
+            plt.savefig(output_heatmap_path, bbox_inches='tight', pad_inches=0)
+            plt.close()
+            print(f"    Создана карта с сообщением об ошибке: {output_heatmap_path}")
+            return True
+        except Exception as fallback_e:
+            print(f"    !!! Критическая ошибка при создании карты ошибки: {fallback_e} !!!")
+            return False
 
 # --- Removed run_full_test() and __main__ block ---
 # This script is now intended to be imported as a module.

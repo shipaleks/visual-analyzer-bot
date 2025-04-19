@@ -832,6 +832,7 @@ def generate_latex_document(data):
 \\documentclass[10pt, a4paper]{{article}}
 \\usepackage[T2A]{{fontenc}}
 \\usepackage[utf8]{{inputenc}}
+\\usepackage[russian]{{babel}}
 \\usepackage{{cmap}}
 \\usepackage{{geometry}}
 \\usepackage{{graphicx}}
@@ -839,6 +840,11 @@ def generate_latex_document(data):
 \\usepackage{{hyperref}}
 \\usepackage{{tikz}}
 \\usepackage{{tcolorbox}}
+\\usepackage{{float}}  % Added for better figure placement with [H]
+
+% Special configuration for better PDF Cyrillic support
+\\pdfmapfile{{+/usr/local/texlive/2023/texmf-dist/fonts/map/dvips/cm-super/cm-super-t2a.map}}
+\\pdfminorversion=7
 
 % Define a simple colorbox replacement since tcolorbox may not be available
 \\newcommand{{\\simplecolorbox}}[3]{{
@@ -865,6 +871,9 @@ def generate_latex_document(data):
 \\geometry{{ a4paper, top=2.5cm, bottom=2.5cm, left=2.5cm, right=2.5cm }}
 \\hypersetup{{ colorlinks=true, linkcolor=blue, filecolor=magenta, urlcolor=cyan, 
     pdftitle={{Отчет об анализе пользовательского интерфейса}}, pdfauthor={{Visual Interface Analyzer}} }}
+
+% Fix to prevent blank pages
+\\let\\cleardoublepage\\clearpage
 
 \\pagestyle{{plain}}
 

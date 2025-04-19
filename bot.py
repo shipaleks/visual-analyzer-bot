@@ -416,30 +416,39 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.info(f"Heatmap file size: {heatmap_size_mb:.2f} MB")
                 if os.path.exists(heatmap_path):
                     try:
-                        logger.info(f"Attempting to send Heatmap as photo: {heatmap_path}")
+                        logger.info(f"Attempting to send Heatmap: {heatmap_path} (Size: {heatmap_size_mb:.2f} MB)")
                         
-                        # Try sending as photo first
+                        # First try to send as photo directly
                         with open(heatmap_path, 'rb') as img_file:
-                            img_bytes = img_file.read()  # Read file into memory
-                            
-                            # Explicitly specify the MIME type
-                            mime_type = "image/png"
-                            file_name = os.path.basename(heatmap_path)
-                            
-                            await context.bot.send_document(
-                                chat_id=chat_id, 
-                                document=InputFile(io.BytesIO(img_bytes), filename=file_name),
+                            await context.bot.send_photo(
+                                chat_id=chat_id,
+                                photo=InputFile(img_file),
                                 caption="Тепловая карта проблемных зон",
                                 parse_mode="HTML"
                             )
-                        logger.info(f"Heatmap sent successfully as document with explicit MIME type")
+                        logger.info("Heatmap sent successfully as photo")
                         results_sent = True
                     except Exception as e:
-                        logger.error(f"Не удалось отправить тепловую карту: {e}")
+                        logger.error(f"Failed to send heatmap as photo: {e}")
+                        
                         try:
-                            await message.reply_text(f"Не удалось отправить тепловую карту.")
-                        except Exception as reply_e:
-                            logger.error(f"Failed to send error reply for Heatmap: {reply_e}")
+                            # Try sending as document instead
+                            logger.info("Trying to send heatmap as document instead...")
+                            with open(heatmap_path, 'rb') as img_file:
+                                img_bytes = img_file.read()
+                                file_name = os.path.basename(heatmap_path)
+                                
+                                await context.bot.send_document(
+                                    chat_id=chat_id, 
+                                    document=InputFile(io.BytesIO(img_bytes), filename=file_name),
+                                    caption="Тепловая карта проблемных зон",
+                                    parse_mode="HTML"
+                                )
+                            logger.info("Heatmap sent successfully as document")
+                            results_sent = True
+                        except Exception as e2:
+                            logger.error(f"Failed to send heatmap as document: {e2}")
+                            await message.reply_text("Не удалось отправить тепловую карту. Проверьте логи сервера.")
                 else:
                     logger.warning(f"Heatmap file path found in stdout, but file does not exist at: {heatmap_path}")
             else:
@@ -597,9 +606,71 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif output_dir:
                 logger.warning(f"Директория для удаления не найдена или небезопасна: {output_dir}")
 
+            # --- ENHANCED DEBUGGING FOR COORDINATES, HEATMAP, AND PDF ISSUES ---
+            # Extra debug logging for coordinates file
+            gemini_coords_parsed = None
+            for line in stdout_str.splitlines():
+                if "Распарсенный Gemini ответ сохранен в:" in line:
+                    gemini_coords_parsed = line.split("Распарсенный Gemini ответ сохранен в:", 1)[1].strip()
+                    logger.info(f"FOUND COORDINATES FILE PATH: {gemini_coords_parsed}")
+                    if os.path.exists(gemini_coords_parsed):
+                        try:
+                            with open(gemini_coords_parsed, 'r', encoding='utf-8') as f:
+                                coords_data = json.load(f)
+                                coords_count = len(coords_data.get("element_coordinates", []))
+                                logger.info(f"COORDINATES FILE EXISTS with {coords_count} elements")
+                        except Exception as e:
+                            logger.error(f"ERROR READING COORDINATES FILE: {e}")
+                    else:
+                        logger.error(f"COORDINATES FILE NOT FOUND AT: {gemini_coords_parsed}")
+            
+            # Extra debug logging for heatmap file
+            heatmap_path = None
+            for line in stdout_str.splitlines():
+                if "Тепловая карта успешно сгенерирована и сохранена в:" in line:
+                    heatmap_path = line.split("Тепловая карта успешно сгенерирована и сохранена в:", 1)[1].strip()
+                    logger.info(f"FOUND HEATMAP FILE PATH: {heatmap_path}")
+                    if os.path.exists(heatmap_path):
+                        heatmap_size_mb = os.path.getsize(heatmap_path) / (1024 * 1024)
+                        logger.info(f"HEATMAP FILE EXISTS with size: {heatmap_size_mb:.2f} MB")
+                    else:
+                        logger.error(f"HEATMAP FILE NOT FOUND AT: {heatmap_path}")
+            
+            # Extra debug logging for PDF generation
+            pdf_path = None
+            tex_path = None
+            for line in stdout_str.splitlines():
+                if ".pdf" in line and "✅ PDF Отчет:" in line:
+                    pdf_path = line.split("✅ PDF Отчет:", 1)[1].strip()
+                    logger.info(f"FOUND PDF FILE PATH: {pdf_path}")
+                    if os.path.exists(pdf_path):
+                        pdf_size_mb = os.path.getsize(pdf_path) / (1024 * 1024)
+                        logger.info(f"PDF FILE EXISTS with size: {pdf_size_mb:.2f} MB")
+                    else:
+                        logger.error(f"PDF FILE NOT FOUND AT: {pdf_path}")
+                        
+                        # Check if tex file exists
+                        tex_path = pdf_path.replace(".pdf", ".tex")
+                        if os.path.exists(tex_path):
+                            logger.info(f"TEX FILE EXISTS at: {tex_path}")
+                            # Check log file for errors
+                            log_path = tex_path.replace(".tex", ".log")
+                            if os.path.exists(log_path):
+                                try:
+                                    with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                        log_tail = f.readlines()[-20:]  # Get last 20 lines
+                                        logger.error(f"PDF GENERATION LOG (last 20 lines): {''.join(log_tail)}")
+                                except Exception as e:
+                                    logger.error(f"Error reading log file: {e}")
+                        else:
+                            logger.error(f"TEX FILE NOT FOUND AT: {tex_path}")
+            
+            # ... rest of the existing code ...
+
         except Exception as e:
-            logger.exception("Неожиданная ошибка в handle_image")
-            await message.reply_text("Произошла неожиданная ошибка во время обработки вашего запроса.")
+            logger.error(f"Error in image handling: {e}")
+            traceback.print_exc()
+            await message.reply_text(f"Произошла ошибка при обработке вашего изображения: {e}")
 
 # --- Обработчик ошибок ---
 
