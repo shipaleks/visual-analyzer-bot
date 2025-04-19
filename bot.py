@@ -202,7 +202,6 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 heatmap_size_mb = os.path.getsize(heatmap_path) / (1024 * 1024) if os.path.exists(heatmap_path) else 0
                 logger.info(f"Heatmap file size: {heatmap_size_mb:.2f} MB")
                 if os.path.exists(heatmap_path):
-                    # Send as document to avoid Image_process_failed
                     try:
                         logger.info(f"Attempting to send Heatmap as document: {heatmap_path}")
                         await context.bot.send_document(chat_id=chat_id, document=InputFile(heatmap_path), filename=os.path.basename(heatmap_path), caption="Тепловая карта проблемных зон (файл)")
@@ -219,86 +218,47 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 logger.info("No Heatmap path found in stdout.")
 
-            # --- Formatting and Sending Recommendations ---
-            if rec_path and os.path.exists(rec_path):
-                try:
-                    logger.info(f"Parsing and sending formatted recommendations from {rec_path}")
-                    with open(rec_path, 'r', encoding='utf-8') as f:
-                        recs_data = json.load(f)
-                    for i, rec in enumerate(recs_data.get('strategicRecommendations', []), start=1):
-                        msg = f"<b>💡 Рекомендация {i}: {rec.get('title','Без названия')}</b>\n\n"
-                        if rec.get('problemStatement'):
-                            msg += f"<b>Проблема:</b>\n{rec['problemStatement']}\n\n"
-                        if rec.get('solutionDescription'):
-                            msg += f"<b>Решение:</b>\n{rec['solutionDescription']}\n\n"
-                        if rec.get('businessConstraints'):
-                            msg += f"<b>Бизнес-ограничения:</b>\n{rec['businessConstraints']}\n\n"
-                        if rec.get('expectedImpact'):
-                            msg += f"<b>Ожидаемый эффект:</b>\n{rec['expectedImpact']}\n\n"
-                        if rec.get('crossDomainExample'):
-                            msg += f"<b>Пример из другой области:</b>\n{rec['crossDomainExample']}\n\n"
-                        if rec.get('testingApproach'):
-                            msg += f"<b>Подход к тестированию:</b>\n{rec['testingApproach']}"
-                        await message.reply_html(msg)
-                    results_sent = True
-                except Exception as e:
-                    logger.error(f"Error formatting/sending recommendations: {e}")
-                    # Optional: Send raw JSON file as fallback on formatting error
+            # --- Sending Interpretation JSON file --- 
+            if interp_path:
+                logger.info(f"Checking existence of Interpretation JSON: {interp_path}")
+                if os.path.exists(interp_path):
                     try:
-                        logger.info(f"Attempting to send raw recommendations JSON as fallback due to formatting error.")
-                        await context.bot.send_document(chat_id=chat_id, document=InputFile(rec_path), filename=os.path.basename(rec_path))
-                    except Exception as fallback_e:
-                        logger.error(f"Failed to send raw recommendations JSON fallback: {fallback_e}")
-            else:
-                logger.warning(f"Recommendations JSON not found or unreadable: {rec_path}")
-
-            # --- Formatting and Sending Interpretation ---
-            if interp_path and os.path.exists(interp_path):
-                try:
-                    logger.info(f"Parsing and sending formatted interpretation from {interp_path}")
-                    with open(interp_path, 'r', encoding='utf-8') as f:
-                        interp_data = json.load(f).get("strategicInterpretation", {}) # Get the nested dict
-                    # Corrected keys based on logs
-                    interp_map = {
-                        'cognitiveEcosystem': '🧠 Когнитивная экосистема',
-                        'businessUserTension': '⚖️ Бизнес-напряжение',
-                        'attentionArchitecture': '👁️ Архитектура внимания',
-                        'perceptualCrossroads': '🔀 Перцептивные перекрестки',
-                        'hiddenPatterns': '🕵️ Скрытые паттерны'
-                    }
-                    something_sent = False
-                    for key, label in interp_map.items():
-                        # Check if key exists in the loaded data
-                        if key in interp_data:
-                            logger.info(f"  Found interpretation key: {key}")
-                            value = interp_data.get(key)
-                            if value:
-                                try:
-                                    logger.info(f"  Attempting to send formatted interpretation for {key}")
-                                    await message.reply_html(f"<b>{label}</b>\n{value}")
-                                    something_sent = True
-                                except Exception as send_e:
-                                    logger.error(f"  Failed to send formatted interpretation for {key}: {send_e}")
-                            else:
-                                logger.warning(f"  Interpretation key '{key}' found but value is empty.")
-                        else:
-                            logger.warning(f"  Interpretation key '{key}' not found in JSON data.")
-                    if something_sent:
-                        results_sent = True # Mark overall success if at least one part was sent
-                except Exception as e:
-                    logger.error(f"Error formatting/sending interpretation: {e}")
-                    # Optional: Send raw JSON file as fallback on formatting error
-                    try:
-                        logger.info(f"Attempting to send raw interpretation JSON as fallback due to formatting error.")
+                        logger.info(f"Attempting to send Interpretation JSON file: {interp_path}")
                         await context.bot.send_document(chat_id=chat_id, document=InputFile(interp_path), filename=os.path.basename(interp_path))
-                    except Exception as fallback_e:
-                        logger.error(f"Failed to send raw interpretation JSON fallback: {fallback_e}")
+                        logger.info(f"Отправлен файл интерпретации: {interp_path}")
+                        results_sent = True
+                    except Exception as e:
+                        logger.error(f"Не удалось отправить файл интерпретации {interp_path}: {e}")
+                        try:
+                            await message.reply_text("Не удалось отправить файл интерпретации.")
+                        except Exception as reply_e:
+                             logger.error(f"Failed to send error reply for Interpretation JSON: {reply_e}")
+                else:
+                    logger.warning(f"Interpretation JSON path found in stdout, but file does not exist at: {interp_path}")
             else:
-                if interp_path: logger.warning(f"Interpretation JSON file not found at path: {interp_path}")
-                else: logger.info("No Interpretation JSON path found in stdout.")
+                logger.info("No Interpretation JSON path found in stdout.")
 
-            # --- Fallback Sending TeX file ---
-            # Logic changed slightly: Send TeX only if PDF wasn't successfully generated (regardless of path found)
+            # --- Sending Recommendations JSON file --- 
+            if rec_path:
+                logger.info(f"Checking existence of Recommendations JSON: {rec_path}")
+                if os.path.exists(rec_path):
+                    try:
+                        logger.info(f"Attempting to send Recommendations JSON file: {rec_path}")
+                        await context.bot.send_document(chat_id=chat_id, document=InputFile(rec_path), filename=os.path.basename(rec_path))
+                        logger.info(f"Отправлен файл рекомендаций: {rec_path}")
+                        results_sent = True
+                    except Exception as e:
+                        logger.error(f"Не удалось отправить файл рекомендаций {rec_path}: {e}")
+                        try:
+                            await message.reply_text("Не удалось отправить файл рекомендаций.")
+                        except Exception as reply_e:
+                             logger.error(f"Failed to send error reply for Recommendations JSON: {reply_e}")
+                else:
+                    logger.warning(f"Recommendations JSON path found in stdout, but file does not exist at: {rec_path}")
+            else:
+                logger.info("No Recommendations JSON path found in stdout.")
+
+            # --- Fallback Sending TeX file --- 
             if not pdf_path_match: # Only if PDF path wasn't found or didn't exist
                 logger.info("PDF path missing or file not found, attempting fallback to TeX file.")
                 if tex_path:
@@ -319,6 +279,53 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         logger.warning(f"Fallback TeX path found in stdout, but file does not exist at: {tex_path}")
                 else:
                     logger.info("No Fallback TeX path found in stdout.")
+
+            # --- Sending Interpretation Text --- 
+            if interp_path:
+                logger.info(f"Checking existence of Interpretation JSON for inline text: {interp_path}")
+                if os.path.exists(interp_path):
+                    try:
+                        logger.info(f"Attempting to read and send Interpretation text: {interp_path}")
+                        with open(interp_path, 'r', encoding='utf-8') as f:
+                            interp_data = json.load(f) # Load as JSON to potentially format later
+                        # Send raw JSON for now, can format later if needed
+                        interp_text = json.dumps(interp_data, indent=2, ensure_ascii=False)
+                        # Split into chunks if too long
+                        MAX_MSG_LEN = 4000
+                        text_chunks = [interp_text[i:i+MAX_MSG_LEN] for i in range(0, len(interp_text), MAX_MSG_LEN)]
+                        for chunk in text_chunks:
+                            await message.reply_text(f"📄 Интерпретация (часть):\n```json\n{chunk}\n```", parse_mode="Markdown")
+                        results_sent = True # Mark as sent even if only text is sent
+                    except telegram.error.BadRequest as e:
+                        logger.error(f"Error sending interpretation text (possibly Markdown issue): {e}")
+                    except Exception as e:
+                        logger.error(f"Не удалось отправить текст интерпретации {interp_path}: {e}")
+                else:
+                    logger.warning(f"Interpretation JSON path found in stdout, but file does not exist at: {interp_path} (for text sending)")
+            else:
+                logger.info("No Interpretation JSON path found in stdout (for text sending).")
+
+            # --- Sending Recommendations Text --- 
+            if rec_path:
+                logger.info(f"Checking existence of Recommendations JSON for inline text: {rec_path}")
+                if os.path.exists(rec_path):
+                    try:
+                        logger.info(f"Attempting to read and send Recommendations text: {rec_path}")
+                        with open(rec_path, 'r', encoding='utf-8') as f:
+                            rec_data = json.load(f) # Load as JSON
+                        rec_text = json.dumps(rec_data, indent=2, ensure_ascii=False)
+                        text_chunks = [rec_text[i:i+MAX_MSG_LEN] for i in range(0, len(rec_text), MAX_MSG_LEN)]
+                        for chunk in text_chunks:
+                            await message.reply_text(f"💡 Рекомендации (часть):\n```json\n{chunk}\n```", parse_mode="Markdown")
+                        results_sent = True
+                    except telegram.error.BadRequest as e:
+                        logger.error(f"Error sending recommendations text (possibly Markdown issue): {e}")
+                    except Exception as e:
+                        logger.error(f"Не удалось отправить текст рекомендаций {rec_path}: {e}")
+                else:
+                    logger.warning(f"Recommendations JSON path found in stdout, but file does not exist at: {rec_path} (for text sending)")
+            else:
+                logger.info("No Recommendations JSON path found in stdout (for text sending).")
 
             if not results_sent:
                 # If after all attempts nothing was sent, inform the user

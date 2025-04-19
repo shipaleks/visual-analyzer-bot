@@ -842,9 +842,6 @@ def generate_latex_document(data):
 \\usepackage{{lastpage}}
 \\usepackage{{multirow}}
 \\usepackage[english, russian]{{babel}}
-\\usepackage{tikz} % For drawing diagrams
-\\usepackage{float} % For [H] placement
-\\usepackage{tcolorbox} % For colored blocks
 
 \\geometry{{ a4paper, top=2.5cm, bottom=2.5cm, left=2.5cm, right=2.5cm }}
 \\hypersetup{{ colorlinks=true, linkcolor=blue, filecolor=magenta, urlcolor=cyan, 
