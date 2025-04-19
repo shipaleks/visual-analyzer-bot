@@ -826,22 +826,21 @@ def generate_latex_document(data):
     latex_path = "" 
     
     latex_document = f"""
-\\documentclass[a4paper,12pt,openany]{{article}}
-\\usepackage[utf8]{{inputenc}}
+\\documentclass[10pt, a4paper]{{article}}
 \\usepackage[T2A]{{fontenc}}
-\\usepackage[russian]{{babel}}
-\\usepackage{{amsmath,amssymb,amsfonts}}
-\\usepackage{{graphicx}}
+\\usepackage[utf8]{{inputenc}}
 \\usepackage{{geometry}}
-\\usepackage{{tikz}}
-\\usepackage{{multirow}}
-\\usepackage{{booktabs}}
+\\usepackage{{graphicx}}
 \\usepackage{{xcolor}}
 \\usepackage{{hyperref}}
-\\usepackage{{fancyhdr}}
-\\usepackage{{float}}
-\\usepackage{{tcolorbox}}
+\\usepackage{{array}}
+\\usepackage{{longtable}}
+\\usepackage{{booktabs}}
 \\usepackage{{colortbl}}
+\\usepackage{{fancyhdr}}
+\\usepackage{{lastpage}}
+\\usepackage{{multirow}}
+\\usepackage[english, russian]{{babel}}
 
 \\geometry{{ a4paper, top=2.5cm, bottom=2.5cm, left=2.5cm, right=2.5cm }}
 \\hypersetup{{ colorlinks=true, linkcolor=blue, filecolor=magenta, urlcolor=cyan, 
