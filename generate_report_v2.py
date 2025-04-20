@@ -371,7 +371,7 @@ def generate_category_scores(data):
         elif score >= 40: cell_color = "yellow!30"
         else: cell_color = "green!15"
             
-        table_rows += f"{sanitize_latex(label)} & \\cellcolor{{{cell_color}}}{score:.0f} \\\\" # Removed trailing \n
+        table_rows += f"{sanitize_latex(label)} & \\cellcolor{{{cell_color}}}{score:.0f} \\\\\n"
     
     section = f"""
 \\section{{Оценки по категориям}}
@@ -421,7 +421,7 @@ def generate_category_scores(data):
 \\begin{{tabular}}{{|l|c|}}
 \\hline
 \\rowcolor{{gray!15}}
-\\textbf{{Категория}} & \\textbf{{Оценка (1-100)}} \\\\\\\\ % Updated scale text
+\\textbf{{Категория}} & \\textbf{{Оценка (1-100)}} \\\\
 \\hline
 {table_rows}
 \\hline
@@ -470,7 +470,7 @@ def generate_component_table(data):
             category_score = category_data.get("score", 0)
             components_data = category_data.get("components", {})
             
-            content += f"\\rowcolor{{gray!10}}\\multicolumn{{2}}{{|l|}}{{\\textbf{{{sanitize_latex(category_name)}}}}} \\\\ \\hline\n"
+            content += f"\\multicolumn{{2}}{{|l|}}{{\\cellcolor{{gray!10}}\\textbf{{{sanitize_latex(category_name)}}}}} \\\\ \\hline\n"
             content += f"\\textbf{{Общая оценка}} & {category_score:.0f} \\\\ \\hline\n" # Display as integer
 
             for component in components:
@@ -504,7 +504,7 @@ def generate_component_table(data):
 \\textbf{{Компонент}} & \\textbf{{Оценка (1-100)}} \\\\ \\hline
 {right_content}
 \\end{{tabular}}
-\\caption{{Детальные оценки всех компонентов интерфейса (1-100)}} % Updated caption
+\\caption{{Детальные оценки всех компонентов интерфейса (1-100)}}
 \\end{{table}}
 
 Таблица представляет подробную разбивку оценок (1-100) по всем компонентам.
@@ -887,7 +887,7 @@ def generate_latex_document(data):
 \\vspace{{1.5cm}}
 \\begin{{tikzpicture}}
 \\draw[rounded corners=20pt, fill=black!5, draw=black!40, line width=1pt] (0,0) rectangle (10,4);
-\\node at (5,2) {{\\Large \\textbf{{Visual Interface Analyzer}}\\\\ \\vspace{{0.5cm}} \\normalsize Аналитический отчет}};
+\\node at (5,2) {{\\Large \\textbf{{Visual Interface Analyzer}}\\\\\\\\ \\vspace{{0.5cm}} \\normalsize Аналитический отчет}};
 \\end{{tikzpicture}}
 \\vfill
 {{\\large Дата анализа: {timestamp}\\par}}
