@@ -1,4 +1,4 @@
-# redeploy trigger: cosmetic bump
+# redeploy trigger: fix detection - roll back to stable version
 import os
 import logging
 import subprocess
