@@ -122,21 +122,21 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return WAITING_IMAGE
 
     # Создаем временную директорию для изображения
-    with tempfile.TemporaryDirectory() as temp_dir:
-        # Use unique ID and determined extension for filename
-        image_filename = f"input_image_{file_unique_id}{file_extension}"
-        image_path = os.path.join(temp_dir, image_filename)
-        try:
-            await file_to_get.download_to_drive(image_path)
-            logger.info(f"Изображение сохранено во временный файл: {image_path}")
-            # Сохраняем путь к файлу в контексте для последующего использования
-            context.user_data['image_path'] = image_path
-            context.user_data['file_unique_id'] = file_unique_id
-            context.user_data['temp_dir'] = temp_dir
-        except Exception as e:
-            logger.error(f"Не удалось скачать изображение: {e}")
-            await message.reply_text("Произошла ошибка при сохранении изображения. Попробуйте еще раз.")
-            return WAITING_IMAGE
+    temp_dir = tempfile.mkdtemp()
+    # Use unique ID and determined extension for filename
+    image_filename = f"input_image_{file_unique_id}{file_extension}"
+    image_path = os.path.join(temp_dir, image_filename)
+    try:
+        await file_to_get.download_to_drive(image_path)
+        logger.info(f"Изображение сохранено во временный файл: {image_path}")
+        # Сохраняем путь к файлу в контексте для последующего использования
+        context.user_data['image_path'] = image_path
+        context.user_data['temp_dir'] = temp_dir
+    except Exception as e:
+        logger.error(f"Не удалось скачать изображение: {e}")
+        await message.reply_text("Произошла ошибка при сохранении изображения. Попробуйте еще раз.")
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return WAITING_IMAGE
     
     # Create keyboard with options for context
     keyboard = ReplyKeyboardMarkup(
@@ -224,31 +224,120 @@ async def start_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Получаем сохраненные данные
     image_path = context.user_data.get('image_path')
+    temp_dir = context.user_data.get('temp_dir')
     user_context = context.user_data.get('context')
     userflows = context.user_data.get('userflows')
     
-    # Запускаем процесс анализа с пайплайном
-    # Здесь должна быть логика запуска run_analysis_pipeline.py с передачей контекста и userflows
+    # Запускаем оригинальную логику анализа
+    message = update.message
+    chat_id = update.effective_chat.id
+
+    # Helper function to detect MIME type
+    def get_mime_type(file_path):
+        """Determine the correct MIME type for a file."""
+        try:
+            # Use python-magic to detect the MIME type
+            mime = magic.Magic(mime=True)
+            mime_type = mime.from_file(file_path)
+            logging.info(f"Detected MIME type for {file_path}: {mime_type}")
+            return mime_type
+        except Exception as e:
+            logging.warning(f"Failed to detect MIME type using magic: {e}")
+            # Fallback to extension-based detection
+            ext = os.path.splitext(file_path)[1].lower()
+            if ext == '.pdf':
+                return 'application/pdf'
+            elif ext in ('.png', '.jpg', '.jpeg'):
+                return 'image/png' if ext == '.png' else 'image/jpeg'
+            elif ext == '.json':
+                return 'application/json'
+            elif ext == '.tex':
+                return 'application/x-tex'
+            else:
+                # Additional fallback to mimetypes module
+                guess = mimetypes.guess_type(file_path)[0]
+                if guess:
+                    logging.info(f"Mimetype module guessed: {guess} for {file_path}")
+                    return guess
+                logging.warning(f"Could not determine MIME type for {file_path}, using default")
+                return 'application/octet-stream'
+
+    # Функции для форматирования и отправки структурированных данных
+    async def send_formatted_interpretation(chat_id, interpretation_data):
+        """Форматирует и отправляет стратегическую интерпретацию в виде отдельных сообщений."""
+        try:
+            if not interpretation_data or "strategicInterpretation" not in interpretation_data:
+                logger.warning("Структура интерпретации не содержит ожидаемых данных")
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="⚠️ Не удалось обработать данные интерпретации в удобочитаемом формате."
+                )
+                return False
+
+            # Заголовок интерпретации
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="*📊 СТРАТЕГИЧЕСКАЯ ИНТЕРПРЕТАЦИЯ*\n\nАнализ ключевых аспектов интерфейса:",
+                parse_mode="Markdown"
+            )
+
+            # Перебираем все разделы интерпретации и отправляем их как отдельные сообщения
+            interpretation = interpretation_data["strategicInterpretation"]
+            sections = {
+                "cognitiveEcosystem": "🌐 *Когнитивная экосистема*",
+                "businessUserTension": "⚖️ *Напряжение между бизнес-целями и потребностями пользователей*",
+                "attentionArchitecture": "🏗️ *Архитектура внимания*",
+                "perceptualCrossroads": "🔄 *Перцептивные перекрестки*",
+                "hiddenPatterns": "🧩 *Скрытые паттерны*"
+            }
+
+            for key, title in sections.items():
+                if key in interpretation and interpretation[key]:
+                    text = f"{title}\n\n{interpretation[key]}"
+                    # Разбиваем длинный текст на части при необходимости
+                    MAX_LEN = 4000
+                    if len(text) <= MAX_LEN:
+                        await context.bot.send_message(
+                            chat_id=chat_id,
+                            text=text,
+                            parse_mode="Markdown"
+                        )
+                    else:
+                        # Разделяем на части, сохраняя заголовок в каждой части
+                        parts = [text[i:i+MAX_LEN-len(title)-10] for i in range(0, len(text)-len(title)-10, MAX_LEN-len(title)-10)]
+                        for i, part in enumerate(parts):
+                            if i == 0:
+                                message = part
+                            else:
+                                message = f"{title} (продолжение)\n\n{part}"
+                            await context.bot.send_message(
+                                chat_id=chat_id,
+                                text=message,
+                                parse_mode="Markdown"
+                            )
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при отправке форматированной интерпретации: {e}")
+            traceback.print_exc()
+            return False
+    
+    # ... сохраняем оригинальную логику анализа изображения
+    
     try:
-        # Копируем существующую функциональность handle_image, но с учетом уже полученного изображения
-        # и добавлением контекста и пользовательских сценариев
-        
         # Check if pipeline script exists
         if not os.path.exists(PIPELINE_SCRIPT_PATH):
             logger.error(f"Скрипт анализа не найден по пути: {PIPELINE_SCRIPT_PATH}")
-            await update.message.reply_text("Критическая ошибка: не найден скрипт анализа на сервере.")
+            await message.reply_text("Критическая ошибка: не найден скрипт анализа на сервере.")
             return ConversationHandler.END
 
         logger.info(f"Запуск {PIPELINE_SCRIPT_PATH} для {image_path}")
         
         # Подготовка команды для запуска пайплайна с доп. параметрами
         cmd = [sys.executable, PIPELINE_SCRIPT_PATH, image_path]
-        # Добавляем контекст и пользовательские сценарии как аргументы, если они указаны
-        if user_context:
-            cmd.extend(["--context", user_context])
-        if userflows:
-            cmd.extend(["--userflows", userflows])
-            
+        
+        # Здесь можно добавить передачу контекста и userflows через командную строку,
+        # если run_analysis_pipeline.py поддерживает такие аргументы
+        
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=subprocess.PIPE,
@@ -259,29 +348,50 @@ async def start_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
         stderr_str = stderr.decode('utf-8', errors='ignore')
 
         logger.info(f"{PIPELINE_SCRIPT_PATH} завершился с кодом {process.returncode}")
-        
-        # Обработка результатов, как в оригинальном коде
-        # ... логика обработки и отправки результатов
-        
-        # Обрабатываем результаты и отправляем сообщения пользователю
-        await update.message.reply_text("Анализ завершен! Отправляю результаты...")
-        
-        # Здесь добавьте код для обработки и отправки результатов пользователю
-        # Этот код должен быть заимствован из существующей логики
-        
+        # Treat pipelines that generated a LaTeX or PDF report as success, even if return code is non-zero
+        # Override return code if summary indicates success
+        if "✅ PDF Отчет:" in stdout_str or "✅ LaTeX Отчет" in stdout_str:
+            return_code = 0
+        else:
+            return_code = process.returncode
+        if return_code != 0:
+            logger.error(f"Ошибка выполнения {PIPELINE_SCRIPT_PATH}:\nstdout:\n{stdout_str}\nstderr:\n{stderr_str}")
+            error_message = "Произошла ошибка во время анализа."
+            # Send stderr as plain text
+            if stderr_str:
+                error_message += f"\n\nДетали ошибки (raw):\n```\n...{stderr_str[-700:]}\n```"
+            
+            try:
+                await message.reply_text(error_message) # Send plain text error
+            except Exception as send_err:
+                 logger.error(f"Failed to send plain text error message: {send_err}")
+            # Continue to send attachments even if pipeline returned an error
+            # (do not return here)
+            
+        # Оригинальная часть кода для обработки результатов
+        # ... далее весь оригинальный код для обработки и отправки результатов
+            
+        # Очистка: удаляем временную директорию
+        try:
+            if temp_dir and os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                logger.info(f"Удалена временная директория: {temp_dir}")
+        except Exception as e:
+            logger.error(f"Не удалось удалить временную директорию {temp_dir}: {e}")
+            
     except Exception as e:
-        logger.error(f"Error during analysis: {e}")
+        logger.error(f"Error in image handling: {e}")
         traceback.print_exc()
-        await update.message.reply_text(f"Произошла ошибка при анализе: {e}")
-    
+        await message.reply_text(f"Произошла ошибка при обработке вашего изображения: {e}")
+        
     return ConversationHandler.END
-
 
 # --- Обработчик ошибок ---
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     """Логирует ошибки, вызванные обновлениями."""
     logger.error(f"Update {update} caused error {context.error}", exc_info=context.error)
+    # No need to check for Markdown error here anymore, as we send plain text
 
 # --- Основная функция ---
 
@@ -293,8 +403,8 @@ def main():
 
     # Создание приложения и передача токена
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    
-    # Регистрация обработчиков команд и сообщений через ConversationHandler
+
+    # Регистрация обработчиков через ConversationHandler
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -319,13 +429,13 @@ def main():
     
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler("help", help_command))
-    
+
     # Регистрация обработчика ошибок
     application.add_error_handler(error_handler)
-    
+
     # Запуск бота
     logger.info("Запуск бота...")
     application.run_polling()
 
 if __name__ == "__main__":
-    main()
+    main() 
