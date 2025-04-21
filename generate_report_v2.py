@@ -837,6 +837,7 @@ def generate_latex_document(data):
 \\usepackage{{geometry}}
 \\usepackage{{graphicx}}
 \\usepackage[dvipsnames,svgnames]{{xcolor}}
+\\usepackage{{colortbl}}
 \\usepackage{{hyperref}}
 \\usepackage{{tikz}}
 \\usepackage{{tcolorbox}}
