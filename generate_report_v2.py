@@ -371,7 +371,7 @@ def generate_category_scores(data):
         elif score >= 40: cell_color = "yellow!30"
         else: cell_color = "green!15"
             
-        table_rows += f"{sanitize_latex(label)} & \\cellcolor{{{cell_color}}}{score:.0f} \\\\\n"
+        table_rows += f"{sanitize_latex(label)} & \\cellcolor{{{cell_color}}}{{{score:.0f}}} \\\\\\\\\\n"
     
     section = f"""
 \\section{{Оценки по категориям}}
