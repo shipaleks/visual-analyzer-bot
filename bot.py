@@ -80,7 +80,7 @@ async def start_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     if photo:
         # Process photo
-        await message.reply_text("Фото получено. Теперь пара вопросов для уточнения...")
+        await message.reply_text("Фото получено. 👍 Теперь задам пару уточняющих вопросов...")
         try:
             file_to_get = await message.photo[-1].get_file()
             file_unique_id = file_to_get.file_unique_id
@@ -90,7 +90,7 @@ async def start_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return ConversationHandler.END
     elif document and document.mime_type and document.mime_type.startswith('image/'):
         # Process document image
-        await message.reply_text("Изображение (как документ) получено. Теперь пара вопросов для уточнения...")
+        await message.reply_text("Изображение получено. 👍 Теперь задам пару уточняющих вопросов...")
         try:
             file_to_get = await document.get_file()
             file_unique_id = file_to_get.file_unique_id
@@ -215,12 +215,12 @@ async def start_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return ConversationHandler.END
 
     # --- Запуск пайплайна анализа ---
-    message_text = "Запускаю анализ..."
+    message_text = "Отлично! Все данные собраны. Запускаю полный анализ изображения..."
     if interface_type != 'Не указан':
         message_text += f"\nТип: {interface_type}"
     if user_scenario != 'Не указан':
         message_text += f"\nСценарий: {user_scenario}"
-    message_text += "\nЭто может занять несколько минут ⏳"
+    message_text += "\nЭто может занять около 10 минут. Пожалуйста, подождите... ⏳"
     await responder.reply_text(message_text)
 
     try:

@@ -12,6 +12,7 @@ import argparse
 from datetime import datetime
 import shutil
 import traceback # Added import
+from pathlib import Path # Added import
 
 # --- Configuration ---
 # Определяем абсолютные пути к скриптам относительно текущего файла
@@ -374,27 +375,64 @@ def run_pipeline(image_path, interface_type="Анализируемый инте
         pipeline_success = False
         pipeline_error_details += f"Unexpected pipeline error: {e}\n"
 
+    # --- Copy final results to input image directory ---
+    print("\n--- Копирование финальных результатов в директорию исходного изображения ---")
+    try:
+        input_path = Path(image_path)
+        input_dir = input_path.parent
+        input_base_name = input_path.stem
+        target_pdf_path = input_dir / f"{input_base_name}_report.pdf"
+        target_heatmap_path = input_dir / f"{input_base_name}_heatmap.png"
+        source_pdf_path = Path(report_pdf_output) # Use Path for consistency
+        source_heatmap_path = Path(heatmap_output) # Use Path for consistency
+
+        if source_pdf_path.exists():
+            shutil.copy2(str(source_pdf_path), str(target_pdf_path))
+            print(f"✅ PDF отчет скопирован в: {target_pdf_path}")
+        else:
+             print(f"⚠️ Исходный PDF отчет не найден для копирования: {source_pdf_path}")
+
+        if source_heatmap_path.exists():
+            shutil.copy2(str(source_heatmap_path), str(target_heatmap_path))
+            print(f"✅ Тепловая карта скопирована в: {target_heatmap_path}")
+        else:
+             print(f"⚠️ Исходная тепловая карта не найдена для копирования: {source_heatmap_path}")
+
+    except Exception as e:
+        print(f"!!! Ошибка при копировании финальных результатов: {e}")
+        traceback.print_exc()
+        # We don't mark pipeline as failed here, just report the copy error
+
     # --- Final Summary ---
-    print("\n============================== ИТОГОВЫЕ РЕЗУЛЬТАТЫ ==============================\n")
-    # Check existence of final outputs
+    print("\n============================== ИТОГОВЫЕ РЕЗУЛЬТАТЫ ==============================")
+    # Check existence of final outputs in the original output_dir
     final_tex_exists = os.path.exists(f"{report_base_output}.tex")
     final_pdf_exists = os.path.exists(report_pdf_output)
     final_heatmap_exists = os.path.exists(heatmap_output)
     final_interpretation_exists = os.path.exists(interpretation_output)
     final_recommendations_exists = os.path.exists(recommendations_output)
 
-    if final_pdf_exists:
-        print(f"✅ PDF Отчет: {report_pdf_output}")
+    # Check existence of final outputs in the TARGET directory now
+    target_pdf_exists = target_pdf_path.exists()
+    target_heatmap_exists = target_heatmap_path.exists()
+
+    # Update final summary based on copied files
+    if target_pdf_exists:
+        print(f"✅ PDF Отчет (скопированный): {target_pdf_path}")
+    elif final_pdf_exists:
+        print(f"✅ PDF Отчет (исходный): {report_pdf_output}")
     elif final_tex_exists:
         print(f"✅ LaTeX Отчет (.tex): {report_base_output}.tex")
-        print("⚠️ PDF генерация пропущена (pdflatex не доступен). Вы можете скомпилировать .tex вручную.")
+        print("⚠️ PDF генерация пропущена или копирование не удалось. Вы можете скомпилировать .tex вручную или проверить логи копирования.")
     else:
-        print("❌ Отчет не был сгенерирован.")
+        print("❌ Отчет не был сгенерирован или скопирован.")
 
-    if final_heatmap_exists:
-        print(f"✅ Тепловая карта: {heatmap_output}")
+    if target_heatmap_exists:
+        print(f"✅ Тепловая карта (скопированная): {target_heatmap_path}")
+    elif final_heatmap_exists:
+        print(f"✅ Тепловая карта (исходная): {heatmap_output}")
     else:
-        print("❌ Тепловая карта не была сгенерирована.")
+        print("❌ Тепловая карта не была сгенерирована или скопирована.")
 
     if final_interpretation_exists:
         print(f"✅ Файл интерпретации: {interpretation_output}")
@@ -412,11 +450,14 @@ def run_pipeline(image_path, interface_type="Анализируемый инте
         print(pipeline_error_details.strip())
         print("--- Конец ошибок ---")
 
-    print("\n============================== ЗАВЕРШЕНИЕ ПАЙПЛАЙНА ==============================\n")
+    print("\n============================== ЗАВЕРШЕНИЕ ПАЙПЛАЙНА ==============================")
 
-    # Exit with success if at least report Tex or PDF exists
-    if final_pdf_exists or final_tex_exists:
+    # Exit with success if at least the COPIED PDF exists, or fallback to original PDF/Tex
+    if target_pdf_exists:
         sys.exit(0)
+    elif final_pdf_exists or final_tex_exists:
+        print("⚠️ Пайплайн завершен, но финальный PDF не был скопирован в директорию user_images. Бот может не найти результат.")
+        sys.exit(0) # Still exit successfully if original PDF/TEX exists
     else:
         sys.exit(1)
 
