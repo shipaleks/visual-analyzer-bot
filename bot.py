@@ -138,11 +138,115 @@ async def start_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     return GET_TYPE
 
+# --- Новые функции форматирования (перемещены ВЫШЕ start_analysis) ---
+async def format_and_send_interpretation(chat_id: int, json_path: str, bot):
+    """Читает JSON интерпретации, форматирует и отправляет как текст."""
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        message = "*📊 Интерпретация анализа:*\n\n"
+        summary = data.get('analysis_summary', 'Общее резюме не найдено.')
+        message += f"{summary}\n\n"
+
+        findings = data.get('findings', [])
+        if findings:
+            message += "*Основные проблемы:*\n"
+            for i, finding in enumerate(findings, 1):
+                area = finding.get('area', 'N/A')
+                problem = finding.get('problem', 'N/A')
+                severity = finding.get('severity', 'N/A')
+                # Ограничиваем длину сообщения, чтобы не превысить лимит Telegram
+                finding_text = f"{i}. *Область:* {area}\n   *Проблема:* {problem}\n   *Серьезность:* {severity}\n\n"
+                if len(message) + len(finding_text) > 4000: # Оставляем запас
+                    await bot.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
+                    message = "" # Начинаем новое сообщение
+                message += finding_text
+        else:
+            message += "Детальные проблемы не найдены в файле."
+
+        if message: # Отправляем остаток или все сообщение, если оно не было разделено
+            await bot.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
+        logger.info(f"Интерпретация успешно отформатирована и отправлена из {json_path}")
+        return True
+
+    except FileNotFoundError:
+        logger.error(f"Файл интерпретации не найден для форматирования: {json_path}")
+        await bot.send_message(chat_id=chat_id, text="Не удалось найти файл с интерпретацией.")
+        return False
+    except json.JSONDecodeError:
+        logger.error(f"Ошибка декодирования JSON в файле интерпретации: {json_path}")
+        await bot.send_message(chat_id=chat_id, text="Ошибка чтения файла с интерпретацией.")
+        return False
+    except Exception as e:
+        logger.error(f"Ошибка при форматировании/отправке интерпретации: {e}", exc_info=True)
+        await bot.send_message(chat_id=chat_id, text="Произошла ошибка при обработке интерпретации.")
+        return False
+
+async def format_and_send_recommendations(chat_id: int, json_path: str, bot):
+    """Читает JSON рекомендаций, форматирует и отправляет как текст."""
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        recommendations = data.get('recommendations', [])
+        if not recommendations:
+            await bot.send_message(chat_id=chat_id, text="*💡 Рекомендации:*\n\nРекомендации не найдены в файле.", parse_mode='Markdown')
+            return True
+
+        message = "*💡 Рекомендации:*\n\n"
+        for i, rec in enumerate(recommendations, 1):
+            text = rec.get('text', 'N/A')
+            priority = rec.get('priority', 'N/A')
+            rec_text = f"{i}. {text}\n   *Приоритет:* {priority}\n\n"
+            if len(message) + len(rec_text) > 4000: # Оставляем запас
+                await bot.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
+                message = "" # Начинаем новое сообщение
+            message += rec_text
+
+        if message: # Отправляем остаток
+            await bot.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
+        logger.info(f"Рекомендации успешно отформатированы и отправлены из {json_path}")
+        return True
+
+    except FileNotFoundError:
+        logger.error(f"Файл рекомендаций не найден для форматирования: {json_path}")
+        await bot.send_message(chat_id=chat_id, text="Не удалось найти файл с рекомендациями.")
+        return False
+    except json.JSONDecodeError:
+        logger.error(f"Ошибка декодирования JSON в файле рекомендаций: {json_path}")
+        await bot.send_message(chat_id=chat_id, text="Ошибка чтения файла с рекомендациями.")
+        return False
+    except Exception as e:
+        logger.error(f"Ошибка при форматировании/отправке рекомендаций: {e}", exc_info=True)
+        await bot.send_message(chat_id=chat_id, text="Произошла ошибка при обработке рекомендаций.")
+        return False
+
+
 # --- Остальные обработчики диалога будут добавлены ниже ---
 
 async def ask_scenario(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Запрашивает сценарий использования."""
+    """Запрашивает сценарий использования (вызывается после skip_type или received_type)."""
     query = update.callback_query
+    # Важно: Этот обработчик теперь ожидается ТОЛЬКО от CallbackQuery
+    # (после нажатия 'Пропустить' в skip_type или 'Указать сценарий' после received_type)
+    if not query:
+        logger.error("ask_scenario вызван без CallbackQuery!")
+        # Попытка восстановления: если есть сообщение, отправляем новый вопрос
+        if update.message:
+            keyboard = [
+                [InlineKeyboardButton("Указать сценарий", callback_data='specify_scenario')],
+                [InlineKeyboardButton("Пропустить", callback_data='skip_scenario')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(
+                text="Хотите указать типичный сценарий использования этого интерфейса? (например, 'поиск товара', 'заполнение профиля')\nЭто также поможет анализу.",
+                reply_markup=reply_markup
+            )
+            return GET_SCENARIO
+        else:
+             return ConversationHandler.END # Не знаем, что делать
+
     await query.answer()
     keyboard = [
         [InlineKeyboardButton("Указать сценарий", callback_data='specify_scenario')],
@@ -184,16 +288,24 @@ async def received_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     return GET_SCENARIO
 
 async def skip_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Обрабатывает пропуск ввода типа интерфейса и переходит к запросу сценария."""
+    """Обрабатывает пропуск ввода типа интерфейса и спрашивает про сценарий."""
     query = update.callback_query
     await query.answer()
-    context.user_data['interface_type'] = None # Или можно использовать "Не указан"
+    context.user_data['interface_type'] = None # Устанавливаем None
     logger.info("Пользователь пропустил ввод типа интерфейса.")
-    # Переходим к следующему шагу - запросу сценария
-    # Важно: используем query.message для передачи update в ask_scenario, т.к. update здесь - это CallbackQuery
-    # Если update.message не существует (например, если это было первое сообщение), используем query.message
-    responder_message = getattr(update, 'message', query.message)
-    return await ask_scenario(responder_message, context)
+
+    # Редактируем сообщение, чтобы задать вопрос про сценарий
+    keyboard = [
+        [InlineKeyboardButton("Указать сценарий", callback_data='specify_scenario')],
+        [InlineKeyboardButton("Пропустить", callback_data='skip_scenario')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(
+        text="Тип интерфейса пропущен.\n\nХотите указать типичный сценарий использования этого интерфейса? (например, 'поиск товара', 'заполнение профиля')\nЭто также поможет анализу.",
+        reply_markup=reply_markup
+    )
+    # Переходим в состояние ожидания ответа на вопрос о сценарии
+    return GET_SCENARIO
 
 async def start_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Запускает пайплайн анализа с собранными данными."""
@@ -458,9 +570,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 # --- Старые внутренние функции (будут перенесены или удалены) ---
 # Helper function to detect MIME type
 # ... (get_mime_type)
-# Функции для форматирования и отправки структурированных данных
-# ... (send_formatted_interpretation)
-# ... (send_formatted_recommendations)
 
 # --- Запуск пайплайна (будет перенесен в start_analysis) ---
 # try:
