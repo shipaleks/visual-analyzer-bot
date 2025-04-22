@@ -262,14 +262,20 @@ async def start_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             base_filename = image_path_obj.stem # Имя файла без расширения
             results_dir = image_path_obj.parent # Директория с исходным изображением
 
-            # Ищем PDF и PNG файлы с тем же базовым именем + суффиксами
+            # Ищем PDF, PNG и JSON файлы с тем же базовым именем + суффиксами
             pdf_report_pattern = f"{base_filename}_report.pdf"
             heatmap_pattern = f"{base_filename}_heatmap.png"
+            interpretation_pattern = f"{base_filename}_interpretation.json"
+            recommendations_pattern = f"{base_filename}_recommendations.json"
+
             pdf_files = list(results_dir.glob(pdf_report_pattern))
             heatmap_files = list(results_dir.glob(heatmap_pattern))
-            logger.info(f"Поиск результатов: PDF по '{pdf_report_pattern}', Heatmap по '{heatmap_pattern}' в '{results_dir}'")
+            interpretation_files = list(results_dir.glob(interpretation_pattern))
+            recommendations_files = list(results_dir.glob(recommendations_pattern))
 
+            logger.info(f"Поиск результатов: PDF='{pdf_report_pattern}', Heatmap='{heatmap_pattern}', Interpretation='{interpretation_pattern}', Recommendations='{recommendations_pattern}' в '{results_dir}'")
 
+            sent_files_count = 0 # Счетчик успешно отправленных файлов
             sent_files = False
             if pdf_files:
                 pdf_path = str(pdf_files[0])
@@ -278,12 +284,14 @@ async def start_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     with open(pdf_path, 'rb') as pdf_file:
                          await context.bot.send_document(chat_id=chat_id, document=pdf_file, connect_timeout=60, read_timeout=60)
                     sent_files = True
+                    sent_files_count += 1
                 except telegram.error.NetworkError as ne:
                      logger.error(f"Ошибка сети при отправке PDF отчета: {ne}. Попытка увеличения таймаута.")
                      try:
                          with open(pdf_path, 'rb') as pdf_file:
                              await context.bot.send_document(chat_id=chat_id, document=pdf_file, connect_timeout=120, read_timeout=120)
                          sent_files = True
+                         sent_files_count += 1
                      except Exception as e_retry:
                          logger.error(f"Повторная ошибка отправки PDF: {e_retry}")
                          await responder.reply_text("Не удалось отправить PDF отчет из-за проблем с сетью.")
@@ -304,22 +312,24 @@ async def start_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             if heatmap_files:
                 heatmap_path = str(heatmap_files[0])
                 try:
-                    logger.info(f"Отправка тепловой карты: {heatmap_path}")
+                    logger.info(f"Отправка тепловой карты (как документа): {heatmap_path}")
                     with open(heatmap_path, 'rb') as hm_file:
-                        await context.bot.send_photo(chat_id=chat_id, photo=hm_file, connect_timeout=60, read_timeout=60)
+                        await context.bot.send_document(chat_id=chat_id, document=hm_file, connect_timeout=60, read_timeout=60)
                     sent_files = True
+                    sent_files_count += 1
                 except telegram.error.NetworkError as ne:
-                     logger.error(f"Ошибка сети при отправке тепловой карты: {ne}. Попытка увеличения таймаута.")
+                     logger.error(f"Ошибка сети при отправке документа тепловой карты: {ne}. Попытка увеличения таймаута.")
                      try:
                          with open(heatmap_path, 'rb') as hm_file:
-                             await context.bot.send_photo(chat_id=chat_id, photo=hm_file, connect_timeout=120, read_timeout=120)
+                             await context.bot.send_document(chat_id=chat_id, document=hm_file, connect_timeout=120, read_timeout=120)
                          sent_files = True
+                         sent_files_count += 1
                      except Exception as e_retry:
-                         logger.error(f"Повторная ошибка отправки тепловой карты: {e_retry}")
+                         logger.error(f"Повторная ошибка отправки документа тепловой карты: {e_retry}")
                          await responder.reply_text("Не удалось отправить тепловую карту из-за проблем с сетью.")
 
                 except Exception as e:
-                    logger.error(f"Ошибка отправки тепловой карты: {e}", exc_info=True)
+                    logger.error(f"Ошибка отправки документа тепловой карты: {e}", exc_info=True)
                     await responder.reply_text("Не удалось отправить тепловую карту.")
             else:
                 logger.warning(f"Тепловая карта не найдена для {base_filename} в {results_dir}")
@@ -331,9 +341,40 @@ async def start_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     except Exception as list_e:
                         logger.error(f"Не удалось прочитать директорию {results_dir}: {list_e}")
 
+            # Отправка JSON интерпретации
+            if interpretation_files:
+                interpretation_path = str(interpretation_files[0])
+                try:
+                    logger.info(f"Отправка JSON интерпретации: {interpretation_path}")
+                    with open(interpretation_path, 'rb') as interp_file:
+                         await context.bot.send_document(chat_id=chat_id, document=interp_file, caption="JSON с интерпретацией анализа", connect_timeout=60, read_timeout=60)
+                    sent_files_count += 1
+                except Exception as e:
+                    logger.error(f"Ошибка отправки JSON интерпретации: {e}", exc_info=True)
+                    await responder.reply_text("Не удалось отправить файл JSON с интерпретацией.")
+            else:
+                logger.warning(f"JSON интерпретации не найден для {base_filename} в {results_dir}")
 
-            if not sent_files:
-                 await responder.reply_text("Анализ завершен, но не удалось найти файлы результатов (PDF и/или тепловую карту). Проверьте логи.")
+            # Отправка JSON рекомендаций
+            if recommendations_files:
+                recommendations_path = str(recommendations_files[0])
+                try:
+                    logger.info(f"Отправка JSON рекомендаций: {recommendations_path}")
+                    with open(recommendations_path, 'rb') as rec_file:
+                         await context.bot.send_document(chat_id=chat_id, document=rec_file, caption="JSON с рекомендациями", connect_timeout=60, read_timeout=60)
+                    sent_files_count += 1
+                except Exception as e:
+                    logger.error(f"Ошибка отправки JSON рекомендаций: {e}", exc_info=True)
+                    await responder.reply_text("Не удалось отправить файл JSON с рекомендациями.")
+            else:
+                logger.warning(f"JSON рекомендаций не найден для {base_filename} в {results_dir}")
+
+
+            # Обновленное сообщение об отсутствии файлов
+            if sent_files_count == 0:
+                 await responder.reply_text("Анализ завершен, но не удалось найти файлы результатов (PDF, тепловая карта, JSON). Проверьте логи.")
+            elif sent_files_count < 4: # Если отправлены не все 4 файла (PDF, PNG, 2xJSON)
+                 await responder.reply_text("Анализ завершен, но не все файлы результатов удалось отправить. Проверьте сообщения выше и логи.")
 
         else:
             logger.error(f"Ошибка выполнения пайплайна для {image_path}. Код возврата: {process.returncode}")

@@ -377,14 +377,23 @@ def run_pipeline(image_path, interface_type="Анализируемый инте
 
     # --- Copy final results to input image directory ---
     print("\n--- Копирование финальных результатов в директорию исходного изображения ---")
+    target_pdf_path = None
+    target_heatmap_path = None
+    target_interpretation_path = None
+    target_recommendations_path = None
     try:
         input_path = Path(image_path)
         input_dir = input_path.parent
         input_base_name = input_path.stem
         target_pdf_path = input_dir / f"{input_base_name}_report.pdf"
         target_heatmap_path = input_dir / f"{input_base_name}_heatmap.png"
-        source_pdf_path = Path(report_pdf_output) # Use Path for consistency
-        source_heatmap_path = Path(heatmap_output) # Use Path for consistency
+        target_interpretation_path = input_dir / f"{input_base_name}_interpretation.json"
+        target_recommendations_path = input_dir / f"{input_base_name}_recommendations.json"
+
+        source_pdf_path = Path(report_pdf_output)
+        source_heatmap_path = Path(heatmap_output)
+        source_interpretation_path = Path(interpretation_output)
+        source_recommendations_path = Path(recommendations_output)
 
         if source_pdf_path.exists():
             shutil.copy2(str(source_pdf_path), str(target_pdf_path))
@@ -397,6 +406,21 @@ def run_pipeline(image_path, interface_type="Анализируемый инте
             print(f"✅ Тепловая карта скопирована в: {target_heatmap_path}")
         else:
              print(f"⚠️ Исходная тепловая карта не найдена для копирования: {source_heatmap_path}")
+
+        # Copy Interpretation JSON
+        if source_interpretation_path.exists():
+            shutil.copy2(str(source_interpretation_path), str(target_interpretation_path))
+            print(f"✅ JSON интерпретации скопирован в: {target_interpretation_path}")
+        else:
+             print(f"⚠️ Исходный JSON интерпретации не найден для копирования: {source_interpretation_path}")
+
+        # Copy Recommendations JSON
+        if source_recommendations_path.exists():
+            shutil.copy2(str(source_recommendations_path), str(target_recommendations_path))
+            print(f"✅ JSON рекомендаций скопирован в: {target_recommendations_path}")
+        else:
+             print(f"⚠️ Исходный JSON рекомендаций не найден для копирования: {source_recommendations_path}")
+
 
     except Exception as e:
         print(f"!!! Ошибка при копировании финальных результатов: {e}")
@@ -413,8 +437,10 @@ def run_pipeline(image_path, interface_type="Анализируемый инте
     final_recommendations_exists = os.path.exists(recommendations_output)
 
     # Check existence of final outputs in the TARGET directory now
-    target_pdf_exists = target_pdf_path.exists()
-    target_heatmap_exists = target_heatmap_path.exists()
+    target_pdf_exists = target_pdf_path.exists() if target_pdf_path else False
+    target_heatmap_exists = target_heatmap_path.exists() if target_heatmap_path else False
+    target_interpretation_exists = target_interpretation_path.exists() if target_interpretation_path else False
+    target_recommendations_exists = target_recommendations_path.exists() if target_recommendations_path else False
 
     # Update final summary based on copied files
     if target_pdf_exists:
@@ -434,15 +460,19 @@ def run_pipeline(image_path, interface_type="Анализируемый инте
     else:
         print("❌ Тепловая карта не была сгенерирована или скопирована.")
 
-    if final_interpretation_exists:
-        print(f"✅ Файл интерпретации: {interpretation_output}")
+    if target_interpretation_exists:
+        print(f"✅ Файл интерпретации (скопированный): {target_interpretation_path}")
+    elif final_interpretation_exists:
+        print(f"✅ Файл интерпретации (исходный): {interpretation_output}")
     else:
-        print("❌ Файл интерпретации не был сгенерирован.")
+        print("❌ Файл интерпретации не был сгенерирован или скопирован.")
 
-    if final_recommendations_exists:
-        print(f"✅ Файл рекомендаций: {recommendations_output}")
+    if target_recommendations_exists:
+        print(f"✅ Файл рекомендаций (скопированный): {target_recommendations_path}")
+    elif final_recommendations_exists:
+        print(f"✅ Файл рекомендаций (исходный): {recommendations_output}")
     else:
-        print("❌ Файл рекомендаций не был сгенерирован.")
+        print("❌ Файл рекомендаций не был сгенерирован или скопирован.")
 
     if not pipeline_success:
         print("\n--- ❗️ Ошибки во время выполнения пайплайна --- ")
@@ -453,10 +483,15 @@ def run_pipeline(image_path, interface_type="Анализируемый инте
     print("\n============================== ЗАВЕРШЕНИЕ ПАЙПЛАЙНА ==============================")
 
     # Exit with success if at least the COPIED PDF exists, or fallback to original PDF/Tex
-    if target_pdf_exists:
+    # Also consider copied heatmap and JSONs for a more complete success indication
+    if target_pdf_exists and target_heatmap_exists:
+        print("✅ Основные результаты (PDF, Heatmap) скопированы.")
         sys.exit(0)
+    elif target_pdf_exists:
+        print("⚠️ PDF скопирован, но карта и/или JSON не были скопированы.")
+        sys.exit(0) # Exit successfully if at least PDF is copied
     elif final_pdf_exists or final_tex_exists:
-        print("⚠️ Пайплайн завершен, но финальный PDF не был скопирован в директорию user_images. Бот может не найти результат.")
+        print("⚠️ Пайплайн завершен, но финальные результаты не были скопированы в директорию user_images. Бот может не найти результаты.")
         sys.exit(0) # Still exit successfully if original PDF/TEX exists
     else:
         sys.exit(1)
