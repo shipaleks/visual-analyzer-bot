@@ -140,22 +140,20 @@ async def start_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # --- Новые функции форматирования (перемещены ВЫШЕ start_analysis) ---
 async def format_and_send_interpretation(chat_id: int, json_path: str, bot):
-    """Читает JSON интерпретации, форматирует и отправляет как текст."""
+    """Читает JSON интерпретации, форматирует согласно промпту и отправляет как текст."""
     try:
         logger.debug(f"Reading interpretation file: {json_path}")
         with open(json_path, 'r', encoding='utf-8') as f:
             raw_text = f.read()
         logger.debug(f"Raw interpretation content length: {len(raw_text)}")
 
-        # Парсим текст как JSON
         try:
             data = json.loads(raw_text)
             logger.debug("Successfully parsed interpretation JSON.")
         except json.JSONDecodeError as json_err:
             logger.error(f"Ошибка декодирования JSON в файле интерпретации: {json_path} - {json_err}")
-            logger.error(f"Raw text received: {raw_text[:500]}...") # Log beginning of text
+            logger.error(f"Raw text received: {raw_text[:500]}...")
             await bot.send_message(chat_id=chat_id, text=f"Ошибка чтения файла с интерпретацией (неверный формат JSON). Обратитесь к логам.")
-            # Optionally send the raw text as a document for debugging
             try:
                 with open(json_path, 'rb') as f_err:
                     await bot.send_document(chat_id=chat_id, document=f_err, caption="Проблемный файл интерпретации (raw)")
@@ -163,57 +161,71 @@ async def format_and_send_interpretation(chat_id: int, json_path: str, bot):
                  logger.error(f"Не удалось отправить проблемный файл: {send_e}")
             return False
 
-        message = "*📊 Интерпретация анализа:*\n\n"
-        summary = data.get('analysis_summary', 'Общее резюме не найдено.')
-        message += f"{summary}\n\n"
+        interpretation_data = data.get('strategicInterpretation')
+        if not interpretation_data or not isinstance(interpretation_data, dict):
+            logger.warning(f"Ключ 'strategicInterpretation' не найден или имеет неверный тип в {json_path}")
+            await bot.send_message(chat_id=chat_id, text="*📊 Стратегическая интерпретация:*\n\nНе удалось извлечь данные из файла.", parse_mode='Markdown')
+            return False
 
-        findings = data.get('findings', [])
-        if findings:
-            message += "*Основные проблемы:*\n"
-            for i, finding in enumerate(findings, 1):
-                area = finding.get('area', 'N/A')
-                problem = finding.get('problem', 'N/A')
-                severity = finding.get('severity', 'N/A')
-                # Ограничиваем длину сообщения, чтобы не превысить лимит Telegram
-                finding_text = f"{i}. *Область:* {area}\n   *Проблема:* {problem}\n   *Серьезность:* {severity}\n\n"
-                if len(message) + len(finding_text) > 4000: # Оставляем запас
+        message = "*📊 Стратегическая интерпретация:*\n\n"
+        key_map = {
+            "cognitiveEcosystem": "Когнитивная экосистема",
+            "businessUserTension": "Противоречия Бизнес/Пользователь",
+            "attentionArchitecture": "Архитектура внимания",
+            "perceptualCrossroads": "Перцептивные перекрестки",
+            "hiddenPatterns": "Скрытые паттерны"
+        }
+
+        sent_something = False
+        for key, title in key_map.items():
+            text = interpretation_data.get(key)
+            if text:
+                section = f"*{title}:*\n{text}\n\n"
+                # Проверяем длину перед добавлением, чтобы не превысить лимит
+                if len(message) + len(section) > 4000:
                     await bot.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
                     message = "" # Начинаем новое сообщение
-                message += finding_text
-        else:
-            message += "Детальные проблемы не найдены в файле."
+                    sent_something = True
+                message += section
 
-        if message: # Отправляем остаток или все сообщение, если оно не было разделено
-            await bot.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
-        logger.info(f"Интерпретация успешно отформатирована и отправлена из {json_path}")
-        return True
+        # Отправляем последнюю часть сообщения, если она есть
+        if message.strip() != "*📊 Стратегическая интерпретация:*":
+             await bot.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
+             sent_something = True
+
+        if sent_something:
+             logger.info(f"Интерпретация успешно отформатирована и отправлена из {json_path}")
+             return True
+        else:
+             logger.warning(f"Не найдено данных для отправки в strategicInterpretation в файле {json_path}")
+             await bot.send_message(chat_id=chat_id, text="*📊 Стратегическая интерпретация:*\n\nДанные в файле не найдены или пусты.", parse_mode='Markdown')
+             return False
 
     except FileNotFoundError:
         logger.error(f"Файл интерпретации не найден для форматирования: {json_path}")
         await bot.send_message(chat_id=chat_id, text="Не удалось найти файл с интерпретацией.")
         return False
+    # Общий Exception для других непредвиденных ошибок
     except Exception as e:
         logger.error(f"Ошибка при форматировании/отправке интерпретации: {e}", exc_info=True)
         await bot.send_message(chat_id=chat_id, text="Произошла ошибка при обработке интерпретации.")
         return False
 
 async def format_and_send_recommendations(chat_id: int, json_path: str, bot):
-    """Читает JSON рекомендаций, форматирует и отправляет как текст."""
+    """Читает JSON рекомендаций, форматирует согласно промпту и отправляет как текст."""
     try:
         logger.debug(f"Reading recommendations file: {json_path}")
         with open(json_path, 'r', encoding='utf-8') as f:
             raw_text = f.read()
         logger.debug(f"Raw recommendations content length: {len(raw_text)}")
 
-        # Парсим текст как JSON
         try:
             data = json.loads(raw_text)
             logger.debug("Successfully parsed recommendations JSON.")
         except json.JSONDecodeError as json_err:
             logger.error(f"Ошибка декодирования JSON в файле рекомендаций: {json_path} - {json_err}")
-            logger.error(f"Raw text received: {raw_text[:500]}...") # Log beginning of text
+            logger.error(f"Raw text received: {raw_text[:500]}...")
             await bot.send_message(chat_id=chat_id, text=f"Ошибка чтения файла с рекомендациями (неверный формат JSON). Обратитесь к логам.")
-             # Optionally send the raw text as a document for debugging
             try:
                 with open(json_path, 'rb') as f_err:
                     await bot.send_document(chat_id=chat_id, document=f_err, caption="Проблемный файл рекомендаций (raw)")
@@ -221,30 +233,61 @@ async def format_and_send_recommendations(chat_id: int, json_path: str, bot):
                  logger.error(f"Не удалось отправить проблемный файл: {send_e}")
             return False
 
-        recommendations = data.get('recommendations', [])
-        if not recommendations:
-            await bot.send_message(chat_id=chat_id, text="*💡 Рекомендации:*\n\nРекомендации не найдены в файле.", parse_mode='Markdown')
+        recommendations_list = data.get('strategicRecommendations')
+        if not recommendations_list or not isinstance(recommendations_list, list):
+            logger.warning(f"Ключ 'strategicRecommendations' не найден или не является списком в {json_path}")
+            await bot.send_message(chat_id=chat_id, text="*💡 Стратегические рекомендации:*\n\nНе удалось извлечь список рекомендаций из файла.", parse_mode='Markdown')
+            return False
+
+        if not recommendations_list: # Проверка на пустой список
+            await bot.send_message(chat_id=chat_id, text="*💡 Стратегические рекомендации:*\n\nСписок рекомендаций пуст.", parse_mode='Markdown')
             return True
 
-        message = "*💡 Рекомендации:*\n\n"
-        for i, rec in enumerate(recommendations, 1):
-            text = rec.get('text', 'N/A')
-            priority = rec.get('priority', 'N/A')
-            rec_text = f"{i}. {text}\n   *Приоритет:* {priority}\n\n"
+        message = "*💡 Стратегические рекомендации:*\n\n"
+        sent_something = False
+        for i, rec in enumerate(recommendations_list, 1):
+            if not isinstance(rec, dict): continue # Пропускаем не-словари
+
+            title = rec.get('title', 'Без названия')
+            problem = rec.get('problemStatement', 'N/A')
+            solution = rec.get('solutionDescription', 'N/A')
+            impact = rec.get('expectedImpact', 'N/A')
+            # Добавляем другие поля по желанию (constraints, example, testing)
+
+            rec_text = (
+                f"*{i}. {title}*\n"
+                f"*Проблема:* {problem}\n"
+                f"*Решение:* {solution}\n"
+                f"*Ожидаемый эффект:* {impact}\n\n"
+            )
+
             if len(message) + len(rec_text) > 4000: # Оставляем запас
                 await bot.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
-                message = "" # Начинаем новое сообщение
+                message = "" # Начинаем новое сообщение для следующей рекомендации
+                sent_something = True
+            # Добавляем рекомендацию к текущему сообщению (или начинаем новое, если старое отправили)
+            if not message: # Если начали новое сообщение, добавляем заголовок
+                 message = f"*(Продолжение рекомендаций)*\n\n"
             message += rec_text
 
-        if message: # Отправляем остаток
+
+        if message.strip() != "*(Продолжение рекомендаций)*" and message.strip() != "*💡 Стратегические рекомендации:*": # Отправляем последнюю часть
             await bot.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
-        logger.info(f"Рекомендации успешно отформатированы и отправлены из {json_path}")
-        return True
+            sent_something = True
+
+        if sent_something:
+            logger.info(f"Рекомендации успешно отформатированы и отправлены из {json_path}")
+            return True
+        else:
+             logger.warning(f"Не найдено валидных данных для отправки в strategicRecommendations в файле {json_path}")
+             await bot.send_message(chat_id=chat_id, text="*💡 Стратегические рекомендации:*\n\nДанные в файле не найдены или пусты.", parse_mode='Markdown')
+             return False
 
     except FileNotFoundError:
         logger.error(f"Файл рекомендаций не найден для форматирования: {json_path}")
         await bot.send_message(chat_id=chat_id, text="Не удалось найти файл с рекомендациями.")
         return False
+    # Общий Exception для других непредвиденных ошибок
     except Exception as e:
         logger.error(f"Ошибка при форматировании/отправке рекомендаций: {e}", exc_info=True)
         await bot.send_message(chat_id=chat_id, text="Произошла ошибка при обработке рекомендаций.")
