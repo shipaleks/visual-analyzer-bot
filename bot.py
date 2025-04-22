@@ -163,13 +163,25 @@ async def ask_type_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return WAIT_TYPE
 
 async def received_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Сохраняет введенный тип интерфейса и переходит к запросу сценария."""
+    """Сохраняет введенный тип интерфейса и запрашивает сценарий."""
     user_type = update.message.text
     context.user_data['interface_type'] = user_type
     logger.info(f"Получен тип интерфейса: {user_type}")
     await update.message.reply_text(f"Тип интерфейса '{user_type}' сохранен.")
-    # Переходим к следующему шагу - запросу сценария
-    return await ask_scenario(update, context) # Вызываем функцию запроса сценария
+
+    # Теперь запрашиваем сценарий, отправляя новое сообщение с кнопками
+    keyboard = [
+        [InlineKeyboardButton("Указать сценарий", callback_data='specify_scenario')],
+        [InlineKeyboardButton("Пропустить", callback_data='skip_scenario')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        text="Хотите указать типичный сценарий использования этого интерфейса? (например, 'поиск товара', 'заполнение профиля')\nЭто также поможет анализу.",
+        reply_markup=reply_markup
+    )
+
+    # Переходим в состояние ожидания ответа на вопрос о сценарии
+    return GET_SCENARIO
 
 async def skip_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Обрабатывает пропуск ввода типа интерфейса и переходит к запросу сценария."""
