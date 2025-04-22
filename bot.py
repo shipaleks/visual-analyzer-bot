@@ -341,31 +341,37 @@ async def start_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     except Exception as list_e:
                         logger.error(f"Не удалось прочитать директорию {results_dir}: {list_e}")
 
-            # Отправка JSON интерпретации
+            # Отправка JSON интерпретации как форматированного текста
             if interpretation_files:
                 interpretation_path = str(interpretation_files[0])
                 try:
-                    logger.info(f"Отправка JSON интерпретации: {interpretation_path}")
-                    with open(interpretation_path, 'rb') as interp_file:
-                         await context.bot.send_document(chat_id=chat_id, document=interp_file, caption="JSON с интерпретацией анализа", connect_timeout=60, read_timeout=60)
-                    sent_files_count += 1
+                    logger.info(f"Отправка форматированной интерпретации из: {interpretation_path}")
+                    if await format_and_send_interpretation(chat_id, interpretation_path, context.bot):
+                         sent_files_count += 1
+                    else:
+                         # Сообщение об ошибке отправляется внутри format_and_send_interpretation
+                         pass
                 except Exception as e:
-                    logger.error(f"Ошибка отправки JSON интерпретации: {e}", exc_info=True)
-                    await responder.reply_text("Не удалось отправить файл JSON с интерпретацией.")
+                    # Логируем ошибку вызова функции, если она сама не обработала
+                    logger.error(f"Критическая ошибка при вызове format_and_send_interpretation: {e}", exc_info=True)
+                    await responder.reply_text("Не удалось обработать/отправить файл JSON с интерпретацией.")
             else:
                 logger.warning(f"JSON интерпретации не найден для {base_filename} в {results_dir}")
 
-            # Отправка JSON рекомендаций
+            # Отправка JSON рекомендаций как форматированного текста
             if recommendations_files:
                 recommendations_path = str(recommendations_files[0])
                 try:
-                    logger.info(f"Отправка JSON рекомендаций: {recommendations_path}")
-                    with open(recommendations_path, 'rb') as rec_file:
-                         await context.bot.send_document(chat_id=chat_id, document=rec_file, caption="JSON с рекомендациями", connect_timeout=60, read_timeout=60)
-                    sent_files_count += 1
+                    logger.info(f"Отправка форматированных рекомендаций из: {recommendations_path}")
+                    if await format_and_send_recommendations(chat_id, recommendations_path, context.bot):
+                         sent_files_count += 1
+                    else:
+                         # Сообщение об ошибке отправляется внутри format_and_send_recommendations
+                         pass
                 except Exception as e:
-                    logger.error(f"Ошибка отправки JSON рекомендаций: {e}", exc_info=True)
-                    await responder.reply_text("Не удалось отправить файл JSON с рекомендациями.")
+                    # Логируем ошибку вызова функции, если она сама не обработала
+                    logger.error(f"Критическая ошибка при вызове format_and_send_recommendations: {e}", exc_info=True)
+                    await responder.reply_text("Не удалось обработать/отправить файл JSON с рекомендациями.")
             else:
                 logger.warning(f"JSON рекомендаций не найден для {base_filename} в {results_dir}")
 
