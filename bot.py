@@ -10,8 +10,11 @@ import sys
 import mimetypes
 import magic  # New import for detecting MIME types
 import telegram
-from telegram import Update, InputFile
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, InputFile, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler, filters, ContextTypes, 
+    ConversationHandler, CallbackQueryHandler
+)
 from dotenv import load_dotenv
 import json
 import glob
@@ -38,6 +41,9 @@ PIPELINE_SCRIPT_PATH = os.path.join(SCRIPT_DIR, 'run_analysis_pipeline.py')
 # Initialize MIME types
 mimetypes.init()
 
+# Define conversation states
+GET_TYPE, WAIT_TYPE, GET_SCENARIO, WAIT_SCENARIO = range(4)
+
 # --- Обработчики команд ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -59,10 +65,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Пожалуйста, отправляй только одно изображение за раз."
     )
 
-# --- Обработчик изображений ---
+# --- Обработчик изображений / Начало диалога ---
 
-async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает полученное изображение (фото или документ), запускает анализ и отправляет результаты."""
+async def start_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Начинает диалог после получения изображения, сохраняет его и спрашивает тип интерфейса."""
     message = update.message
     chat_id = update.effective_chat.id
     file_to_get = None
@@ -74,17 +80,17 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if photo:
         # Process photo
-        await message.reply_text("Фото получено. Начинаю анализ... Это может занять несколько минут ⏳")
+        await message.reply_text("Фото получено. Теперь пара вопросов для уточнения...")
         try:
             file_to_get = await message.photo[-1].get_file()
             file_unique_id = file_to_get.file_unique_id
         except Exception as e:
             logger.error(f"Не удалось получить файл фото: {e}")
             await message.reply_text("Произошла ошибка при получении файла фото. Попробуйте еще раз.")
-            return
+            return ConversationHandler.END
     elif document and document.mime_type and document.mime_type.startswith('image/'):
         # Process document image
-        await message.reply_text("Изображение (как документ) получено. Начинаю анализ... Это может занять несколько минут ⏳")
+        await message.reply_text("Изображение (как документ) получено. Теперь пара вопросов для уточнения...")
         try:
             file_to_get = await document.get_file()
             file_unique_id = file_to_get.file_unique_id
@@ -92,585 +98,317 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Не удалось получить файл документа: {e}")
             await message.reply_text("Произошла ошибка при получении файла документа. Попробуйте еще раз.")
-            return
+            return ConversationHandler.END
     else:
-        # Neither photo nor image document
+        # Should not happen if handler filters are correct, but as a safeguard
         await message.reply_text("Пожалуйста, отправь изображение (как фото или как файл изображения).")
-        return
+        return ConversationHandler.END
 
-    # Создаем временную директорию для изображения
-    with tempfile.TemporaryDirectory() as temp_dir:
-        # Use unique ID and determined extension for filename
-        image_filename = f"input_image_{file_unique_id}{file_extension}"
-        image_path = os.path.join(temp_dir, image_filename)
-        try:
-            await file_to_get.download_to_drive(image_path)
-            logger.info(f"Изображение сохранено во временный файл: {image_path}")
-        except Exception as e:
-            logger.error(f"Не удалось скачать изображение: {e}")
-            await message.reply_text("Произошла ошибка при сохранении изображения. Попробуйте еще раз.")
-            return
+    # Создаем директорию для пользовательских изображений, если ее нет
+    user_images_dir = os.path.join(SCRIPT_DIR, "user_images")
+    os.makedirs(user_images_dir, exist_ok=True)
 
-        # Helper function to detect MIME type
-        def get_mime_type(file_path):
-            """Determine the correct MIME type for a file."""
-            try:
-                # Use python-magic to detect the MIME type
-                mime = magic.Magic(mime=True)
-                mime_type = mime.from_file(file_path)
-                logging.info(f"Detected MIME type for {file_path}: {mime_type}")
-                return mime_type
-            except Exception as e:
-                logging.warning(f"Failed to detect MIME type using magic: {e}")
-                # Fallback to extension-based detection
-                ext = os.path.splitext(file_path)[1].lower()
-                if ext == '.pdf':
-                    return 'application/pdf'
-                elif ext in ('.png', '.jpg', '.jpeg'):
-                    return 'image/png' if ext == '.png' else 'image/jpeg'
-                elif ext == '.json':
-                    return 'application/json'
-                elif ext == '.tex':
-                    return 'application/x-tex'
-                else:
-                    # Additional fallback to mimetypes module
-                    guess = mimetypes.guess_type(file_path)[0]
-                    if guess:
-                        logging.info(f"Mimetype module guessed: {guess} for {file_path}")
-                        return guess
-                    logging.warning(f"Could not determine MIME type for {file_path}, using default")
-                    return 'application/octet-stream'
+    # Сохраняем изображение в user_images/
+    image_filename = f"input_image_{file_unique_id}{file_extension}"
+    image_path = os.path.join(user_images_dir, image_filename)
+    try:
+        await file_to_get.download_to_drive(image_path)
+        logger.info(f"Изображение сохранено в: {image_path}")
+    except Exception as e:
+        logger.error(f"Не удалось скачать изображение: {e}")
+        await message.reply_text("Произошла ошибка при сохранении изображения. Попробуйте еще раз.")
+        return ConversationHandler.END
 
-        # Функции для форматирования и отправки структурированных данных
-        async def send_formatted_interpretation(chat_id, interpretation_data):
-            """Форматирует и отправляет стратегическую интерпретацию в виде отдельных сообщений."""
-            try:
-                if not interpretation_data or "strategicInterpretation" not in interpretation_data:
-                    logger.warning("Структура интерпретации не содержит ожидаемых данных")
-                    await context.bot.send_message(
-                        chat_id=chat_id,
-                        text="⚠️ Не удалось обработать данные интерпретации в удобочитаемом формате."
-                    )
-                    return False
+    # Сохраняем путь к изображению в user_data
+    context.user_data['image_path'] = image_path
+    logger.info(f"Сохранен image_path в user_data: {context.user_data['image_path']}")
+    context.user_data['interface_type'] = None # Инициализируем
+    context.user_data['user_scenario'] = None  # Инициализируем
 
-                # Заголовок интерпретации
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text="*📊 СТРАТЕГИЧЕСКАЯ ИНТЕРПРЕТАЦИЯ*\n\nАнализ ключевых аспектов интерфейса:",
-                    parse_mode="Markdown"
-                )
+    # Спрашиваем про тип интерфейса
+    keyboard = [
+        [InlineKeyboardButton("Указать тип", callback_data='specify_type')],
+        [InlineKeyboardButton("Пропустить", callback_data='skip_type')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await message.reply_text(
+        "Хотите указать тип анализируемого интерфейса? (например, 'страница результатов поиска', 'форма регистрации', 'панель управления')\nЭто поможет сделать анализ точнее.",
+        reply_markup=reply_markup
+    )
 
-                # Перебираем все разделы интерпретации и отправляем их как отдельные сообщения
-                interpretation = interpretation_data["strategicInterpretation"]
-                sections = {
-                    "cognitiveEcosystem": "🌐 *Когнитивная экосистема*",
-                    "businessUserTension": "⚖️ *Напряжение между бизнес-целями и потребностями пользователей*",
-                    "attentionArchitecture": "🏗️ *Архитектура внимания*",
-                    "perceptualCrossroads": "🔄 *Перцептивные перекрестки*",
-                    "hiddenPatterns": "🧩 *Скрытые паттерны*"
-                }
+    return GET_TYPE
 
-                for key, title in sections.items():
-                    if key in interpretation and interpretation[key]:
-                        text = f"{title}\n\n{interpretation[key]}"
-                        # Разбиваем длинный текст на части при необходимости
-                        MAX_LEN = 4000
-                        if len(text) <= MAX_LEN:
-                            await context.bot.send_message(
-                                chat_id=chat_id,
-                                text=text,
-                                parse_mode="Markdown"
-                            )
-                        else:
-                            # Разделяем на части, сохраняя заголовок в каждой части
-                            parts = [text[i:i+MAX_LEN-len(title)-10] for i in range(0, len(text)-len(title)-10, MAX_LEN-len(title)-10)]
-                            for i, part in enumerate(parts):
-                                if i == 0:
-                                    message = part
-                                else:
-                                    message = f"{title} (продолжение)\n\n{part}"
-                                await context.bot.send_message(
-                                    chat_id=chat_id,
-                                    text=message,
-                                    parse_mode="Markdown"
-                                )
-                return True
-            except Exception as e:
-                logger.error(f"Ошибка при отправке форматированной интерпретации: {e}")
-                traceback.print_exc()
-                return False
+# --- Остальные обработчики диалога будут добавлены ниже ---
 
-        async def send_formatted_recommendations(chat_id, recommendations_data):
-            """Форматирует и отправляет стратегические рекомендации в виде отдельных сообщений."""
-            try:
-                if not recommendations_data or "strategicRecommendations" not in recommendations_data:
-                    logger.warning("Структура рекомендаций не содержит ожидаемых данных")
-                    await context.bot.send_message(
-                        chat_id=chat_id,
-                        text="⚠️ Не удалось обработать данные рекомендаций в удобочитаемом формате."
-                    )
-                    return False
+async def ask_scenario(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Запрашивает сценарий использования."""
+    query = update.callback_query
+    await query.answer()
+    keyboard = [
+        [InlineKeyboardButton("Указать сценарий", callback_data='specify_scenario')],
+        [InlineKeyboardButton("Пропустить", callback_data='skip_scenario')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(
+        text="Хотите указать типичный сценарий использования этого интерфейса? (например, 'поиск товара', 'заполнение профиля')\nЭто также поможет анализу.",
+        reply_markup=reply_markup
+    )
+    return GET_SCENARIO
 
-                # Заголовок рекомендаций
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text="*💡 СТРАТЕГИЧЕСКИЕ РЕКОМЕНДАЦИИ*\n\nПредлагаемые улучшения интерфейса:",
-                    parse_mode="Markdown"
-                )
+async def ask_type_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Ответ на кнопку 'Указать тип'. Просит пользователя ввести текст."""
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(text="Пожалуйста, введите тип интерфейса:")
+    return WAIT_TYPE
 
-                # Перебираем все рекомендации и отправляем их как отдельные сообщения
-                recommendations = recommendations_data["strategicRecommendations"]
-                for i, rec in enumerate(recommendations, 1):
-                    # Формируем текст рекомендации
-                    text = f"*{i}. {rec.get('title', 'Рекомендация')}*\n\n"
-                    
-                    if "problemStatement" in rec:
-                        text += f"*Проблема:*\n{rec['problemStatement']}\n\n"
-                    
-                    if "solutionDescription" in rec:
-                        text += f"*Решение:*\n{rec['solutionDescription']}\n\n"
-                    
-                    if "expectedImpact" in rec:
-                        text += f"*Ожидаемый эффект:*\n{rec['expectedImpact']}\n\n"
-                    
-                    if "businessConstraints" in rec:
-                        text += f"*Бизнес-ограничения:*\n{rec['businessConstraints']}\n\n"
-                    
-                    # Дополнительная информация в зависимости от длины основного текста
-                    additional_text = ""
-                    if "crossDomainExample" in rec:
-                        additional_text += f"*Пример из других областей:*\n{rec['crossDomainExample']}\n\n"
-                    
-                    if "testingApproach" in rec:
-                        additional_text += f"*Подход к тестированию:*\n{rec['testingApproach']}\n\n"
-                    
-                    # Разбиваем на части при необходимости
-                    MAX_LEN = 4000
-                    if len(text) <= MAX_LEN:
-                        await context.bot.send_message(
-                            chat_id=chat_id,
-                            text=text,
-                            parse_mode="Markdown"
-                        )
-                    else:
-                        # Если основной текст слишком длинный, разбиваем его
-                        parts = [text[i:i+MAX_LEN] for i in range(0, len(text), MAX_LEN)]
-                        for j, part in enumerate(parts):
-                            part_text = part
-                            if j == 0:
-                                part_text = f"*{i}. {rec.get('title', 'Рекомендация')}*\n\n" + part[len(f"*{i}. {rec.get('title', 'Рекомендация')}*\n\n"):]
-                            else:
-                                part_text = f"*{i}. {rec.get('title', 'Рекомендация')}* (продолжение {j+1})\n\n" + part
-                            
-                            await context.bot.send_message(
-                                chat_id=chat_id,
-                                text=part_text,
-                                parse_mode="Markdown"
-                            )
-                    
-                    # Отправляем дополнительную информацию отдельным сообщением, если она есть
-                    if additional_text and len(additional_text) > 0:
-                        if len(additional_text) <= MAX_LEN:
-                            await context.bot.send_message(
-                                chat_id=chat_id,
-                                text=f"*Дополнительно по рекомендации {i}:*\n\n{additional_text}",
-                                parse_mode="Markdown"
-                            )
-                        else:
-                            # Разбиваем дополнительный текст на части
-                            add_parts = [additional_text[i:i+MAX_LEN] for i in range(0, len(additional_text), MAX_LEN)]
-                            for j, add_part in enumerate(add_parts):
-                                await context.bot.send_message(
-                                    chat_id=chat_id,
-                                    text=f"*Дополнительно по рекомендации {i} (часть {j+1}):*\n\n{add_part}",
-                                    parse_mode="Markdown"
-                                )
-                
-                return True
-            except Exception as e:
-                logger.error(f"Ошибка при отправке форматированных рекомендаций: {e}")
-                traceback.print_exc()
-                return False
+async def received_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Сохраняет введенный тип интерфейса и переходит к запросу сценария."""
+    user_type = update.message.text
+    context.user_data['interface_type'] = user_type
+    logger.info(f"Получен тип интерфейса: {user_type}")
+    await update.message.reply_text(f"Тип интерфейса '{user_type}' сохранен.")
+    # Переходим к следующему шагу - запросу сценария
+    return await ask_scenario(update, context) # Вызываем функцию запроса сценария
 
-        # Запускаем пайплайн анализа
-        try:
-            # Check if pipeline script exists
-            if not os.path.exists(PIPELINE_SCRIPT_PATH):
-                logger.error(f"Скрипт анализа не найден по пути: {PIPELINE_SCRIPT_PATH}")
-                await message.reply_text("Критическая ошибка: не найден скрипт анализа на сервере.")
-                return
+async def skip_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Обрабатывает пропуск ввода типа интерфейса и переходит к запросу сценария."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data['interface_type'] = None # Или можно использовать "Не указан"
+    logger.info("Пользователь пропустил ввод типа интерфейса.")
+    # Переходим к следующему шагу - запросу сценария
+    # Важно: используем query.message для передачи update в ask_scenario, т.к. update здесь - это CallbackQuery
+    # Если update.message не существует (например, если это было первое сообщение), используем query.message
+    responder_message = getattr(update, 'message', query.message)
+    return await ask_scenario(responder_message, context)
 
-            logger.info(f"Запуск {PIPELINE_SCRIPT_PATH} для {image_path}")
-            process = await asyncio.create_subprocess_exec(
-                sys.executable, # Используем тот же python, что и для бота
-                PIPELINE_SCRIPT_PATH, # Use the absolute path
-                image_path,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                # Set working directory to the script's directory? Maybe not needed if paths inside pipeline are ok.
-                # cwd=SCRIPT_DIR
-            )
-            stdout, stderr = await process.communicate()
-            stdout_str = stdout.decode('utf-8', errors='ignore')
-            stderr_str = stderr.decode('utf-8', errors='ignore')
+async def start_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Запускает пайплайн анализа с собранными данными."""
+    logger.info("--- Начинается этап запуска анализа ---")
+    responder = update.message if hasattr(update, 'message') else update.callback_query.message
+    chat_id = responder.chat_id
 
-            logger.info(f"{PIPELINE_SCRIPT_PATH} завершился с кодом {process.returncode}")
-            # Treat pipelines that generated a LaTeX or PDF report as success, even if return code is non-zero
-            # Override return code if summary indicates success
-            if "✅ PDF Отчет:" in stdout_str or "✅ LaTeX Отчет" in stdout_str:
-                return_code = 0
-            else:
-                return_code = process.returncode
-            if return_code != 0:
-                logger.error(f"Ошибка выполнения {PIPELINE_SCRIPT_PATH}:\nstdout:\n{stdout_str}\nstderr:\n{stderr_str}")
-                error_message = "Произошла ошибка во время анализа."
-                # Send stderr as plain text
-                if stderr_str:
-                    error_message += f"\n\nДетали ошибки (raw):\n```\n...{stderr_str[-700:]}\n```"
-                
+    image_path = context.user_data.get('image_path')
+    # Используем 'Не указан' если значение None или пустая строка
+    interface_type = context.user_data.get('interface_type') or 'Не указан'
+    user_scenario = context.user_data.get('user_scenario') or 'Не указан'
+
+    logger.info(f"Данные для анализа: image_path={image_path}, interface_type='{interface_type}', user_scenario='{user_scenario}'")
+
+    if not image_path or not os.path.exists(image_path):
+        logger.error("Ошибка: путь к изображению не найден в user_data или файл не существует.")
+        await responder.reply_text("Критическая ошибка: не удалось найти сохраненное изображение. Попробуйте начать заново.")
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    # --- Запуск пайплайна анализа ---
+    message_text = "Запускаю анализ..."
+    if interface_type != 'Не указан':
+        message_text += f"\nТип: {interface_type}"
+    if user_scenario != 'Не указан':
+        message_text += f"\nСценарий: {user_scenario}"
+    message_text += "\nЭто может занять несколько минут ⏳"
+    await responder.reply_text(message_text)
+
+    try:
+        # Проверяем существование скрипта пайплайна
+        if not os.path.exists(PIPELINE_SCRIPT_PATH):
+            logger.error(f"Скрипт пайплайна не найден по пути: {PIPELINE_SCRIPT_PATH}")
+            await responder.reply_text("Ошибка: Не удалось найти скрипт анализа. Обратитесь к администратору.")
+            context.user_data.clear()
+            return ConversationHandler.END
+
+        # Формируем команду для запуска
+        command = [
+            sys.executable,  # Используем тот же python, что и для бота
+            PIPELINE_SCRIPT_PATH,
+            '--image-path', image_path,
+            '--interface-type', interface_type,
+            '--user-scenario', user_scenario
+        ]
+        logger.info(f"Запуск команды: {' '.join(command)}")
+
+        # Запускаем пайплайн асинхронно
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await process.communicate() # Ждем завершения
+        stdout_decoded = stdout.decode().strip() if stdout else ""
+        stderr_decoded = stderr.decode().strip() if stderr else ""
+
+
+        if process.returncode == 0:
+            logger.info(f"Пайплайн успешно завершен для {image_path}.")
+            if stdout_decoded: logger.info(f"Pipeline stdout:\n{stdout_decoded}")
+            if stderr_decoded: logger.warning(f"Pipeline stderr:\n{stderr_decoded}") # Логируем stderr даже при успехе
+
+            # --- Поиск и отправка результатов ---
+            image_path_obj = Path(image_path)
+            base_filename = image_path_obj.stem # Имя файла без расширения
+            results_dir = image_path_obj.parent # Директория с исходным изображением
+
+            # Ищем PDF и PNG файлы с тем же базовым именем + суффиксами
+            pdf_report_pattern = f"{base_filename}_report.pdf"
+            heatmap_pattern = f"{base_filename}_heatmap.png"
+            pdf_files = list(results_dir.glob(pdf_report_pattern))
+            heatmap_files = list(results_dir.glob(heatmap_pattern))
+            logger.info(f"Поиск результатов: PDF по '{pdf_report_pattern}', Heatmap по '{heatmap_pattern}' в '{results_dir}'")
+
+
+            sent_files = False
+            if pdf_files:
+                pdf_path = str(pdf_files[0])
                 try:
-                    await message.reply_text(error_message) # Send plain text error
-                except Exception as send_err:
-                     logger.error(f"Failed to send plain text error message: {send_err}")
-                # Continue to send attachments even if pipeline returned an error
-                # (do not return here)
-
-            logger.info(f"stdout {PIPELINE_SCRIPT_PATH}:\n{stdout_str}") # Log received stdout
-            if stderr_str: # Логируем stderr даже при успешном выполнении
-                logger.warning(f"stderr {PIPELINE_SCRIPT_PATH} (при коде 0):\n{stderr_str}")
-
-            # Извлекаем пути к результатам из stdout
-            logger.info("Parsing pipeline stdout for result paths...")
-            pdf_path_match = re.search(r"✅ PDF Отчет: (.*\.pdf)", stdout_str)
-            heatmap_path_match = re.search(r"✅ Тепловая карта: (.*\.png)", stdout_str)
-            interp_match = re.search(r"✅ Файл интерпретации: (.*\.json)", stdout_str)
-            rec_match = re.search(r"✅ Файл рекомендаций: (.*\.json)", stdout_str)
-            tex_match = re.search(r"✅ LaTeX Отчет.*: (.*\.tex)", stdout_str)
-
-            pdf_path = pdf_path_match.group(1).strip() if pdf_path_match else None
-            heatmap_path = heatmap_path_match.group(1).strip() if heatmap_path_match else None
-            interp_path = interp_match.group(1).strip() if interp_match else None
-            rec_path = rec_match.group(1).strip() if rec_match else None
-            tex_path = tex_match.group(1).strip() if tex_match else None
-            output_dir_match = re.search(r"Результаты будут сохранены в: (?:\./)?(analysis_outputs/run_\d{8}_\d{6})", stdout_str)
-            output_dir = output_dir_match.group(1).strip() if output_dir_match else None # Group 1 is the analysis_outputs/... part
-
-            logger.info(f"  Parsed PDF path: {pdf_path}")
-            logger.info(f"  Parsed Heatmap path: {heatmap_path}")
-            logger.info(f"  Parsed Interpretation path: {interp_path}")
-            logger.info(f"  Parsed Recommendations path: {rec_path}")
-            logger.info(f"  Parsed Fallback TeX path: {tex_path}")
-            logger.info(f"  Parsed Output dir for cleanup: {output_dir}")
-
-            # Отправляем результаты
-            await message.reply_text("Анализ завершен! Отправляю результаты...")
-
-            results_sent = False
-            # --- Sending PDF --- 
-            if pdf_path:
-                logger.info(f"Checking existence of PDF: {pdf_path}")
-                if os.path.exists(pdf_path):
-                    try:
-                        logger.info(f"Attempting to send PDF: {pdf_path}")
-                        # Get MIME type for PDF
-                        mime_type = get_mime_type(pdf_path)
-                        logger.info(f"Detected MIME type for PDF: {mime_type}")
-                        
-                        with open(pdf_path, 'rb') as pdf_file:
-                            pdf_bytes = pdf_file.read()  # Read file into memory
-                            await context.bot.send_document(
-                                chat_id=chat_id, 
-                                document=InputFile(pdf_bytes, filename=os.path.basename(pdf_path)),
-                                caption="Анализ UI (PDF)"
-                            )
-                        logger.info(f"Отправлен PDF: {pdf_path}")
-                        results_sent = True
-                    except Exception as e:
-                        logger.error(f"Не удалось отправить PDF {pdf_path}: {e}")
-                        try:
-                            # Try simplified approach
-                            with open(pdf_path, 'rb') as pdf_file:
-                                await context.bot.send_document(
-                                    chat_id=chat_id,
-                                    document=pdf_file,
-                                    filename=os.path.basename(pdf_path),
-                                    caption="Анализ UI (PDF) - резервный метод"
-                                )
-                            logger.info(f"PDF отправлен резервным методом: {pdf_path}")
-                            results_sent = True
-                        except Exception as e2:
-                            logger.error(f"Не удалось отправить PDF резервным методом: {e2}")
-                            try:
-                                await message.reply_text(f"Не удалось отправить PDF отчет.") 
-                            except Exception as reply_e:
-                                logger.error(f"Failed to send error reply for PDF: {reply_e}")
-                else:
-                    logger.warning(f"PDF file path found in stdout, but file does not exist at: {pdf_path}")
-            else:
-                logger.info("No PDF path found in stdout.")
-
-            # --- Sending Heatmap --- 
-            if heatmap_path:
-                logger.info(f"Checking existence of Heatmap: {heatmap_path}")
-                heatmap_size_mb = os.path.getsize(heatmap_path) / (1024 * 1024) if os.path.exists(heatmap_path) else 0
-                logger.info(f"Heatmap file size: {heatmap_size_mb:.2f} MB")
-                if os.path.exists(heatmap_path):
-                    try:
-                        logger.info(f"Attempting to send Heatmap: {heatmap_path} (Size: {heatmap_size_mb:.2f} MB)")
-                        
-                        # First try to send as photo directly
-                        with open(heatmap_path, 'rb') as img_file:
-                            await context.bot.send_photo(
-                                chat_id=chat_id,
-                                photo=InputFile(img_file),
-                                caption="Тепловая карта проблемных зон",
-                                parse_mode="HTML"
-                            )
-                        logger.info("Heatmap sent successfully as photo")
-                        results_sent = True
-                    except Exception as e:
-                        logger.error(f"Failed to send heatmap as photo: {e}")
-                        
-                        try:
-                            # Try sending as document instead
-                            logger.info("Trying to send heatmap as document instead...")
-                            with open(heatmap_path, 'rb') as img_file:
-                                img_bytes = img_file.read()
-                                file_name = os.path.basename(heatmap_path)
-                                
-                                await context.bot.send_document(
-                                    chat_id=chat_id, 
-                                    document=InputFile(io.BytesIO(img_bytes), filename=file_name),
-                                    caption="Тепловая карта проблемных зон",
-                                    parse_mode="HTML"
-                                )
-                            logger.info("Heatmap sent successfully as document")
-                            results_sent = True
-                        except Exception as e2:
-                            logger.error(f"Failed to send heatmap as document: {e2}")
-                            await message.reply_text("Не удалось отправить тепловую карту. Проверьте логи сервера.")
-                else:
-                    logger.warning(f"Heatmap file path found in stdout, but file does not exist at: {heatmap_path}")
-            else:
-                logger.info("No Heatmap path found in stdout.")
-
-            # --- Sending Interpretation JSON file --- 
-            if interp_path:
-                logger.info(f"Checking existence of Interpretation JSON: {interp_path}")
-                if os.path.exists(interp_path):
-                    try:
-                        # Сначала отправляем форматированный текст
-                        logger.info(f"Attempting to read and format Interpretation: {interp_path}")
-                        with open(interp_path, 'r', encoding='utf-8') as f:
-                            interp_data = json.load(f)
-                        
-                        interp_formatted_sent = await send_formatted_interpretation(chat_id, interp_data)
-                        
-                        # Затем отправляем исходный JSON-файл как документ для сохранения
-                        logger.info(f"Attempting to send Interpretation JSON file: {interp_path}")
-                        with open(interp_path, 'rb') as json_file:
-                            json_bytes = json_file.read() 
-                            mime_type = "application/json"
-                            file_name = os.path.basename(interp_path)
-                            
-                            await context.bot.send_document(
-                                chat_id=chat_id, 
-                                document=InputFile(io.BytesIO(json_bytes), filename=file_name),
-                                caption="Стратегическая интерпретация (JSON для сохранения)",
-                                parse_mode="HTML"
-                            )
-                        logger.info(f"Отправлен файл интерпретации: {interp_path}")
-                        results_sent = True
-                    except Exception as e:
-                        logger.error(f"Не удалось отправить интерпретацию {interp_path}: {e}")
-                        try:
-                            await message.reply_text("Не удалось отправить интерпретацию.")
-                        except Exception as reply_e:
-                            logger.error(f"Failed to send error reply for Interpretation: {reply_e}")
-                else:
-                    logger.warning(f"Interpretation JSON path found in stdout, but file does not exist at: {interp_path}")
-            else:
-                logger.info("No Interpretation JSON path found in stdout.")
-
-            # --- Sending Recommendations JSON file --- 
-            if rec_path:
-                logger.info(f"Checking existence of Recommendations JSON: {rec_path}")
-                if os.path.exists(rec_path):
-                    try:
-                        # Сначала отправляем форматированный текст
-                        logger.info(f"Attempting to read and format Recommendations: {rec_path}")
-                        with open(rec_path, 'r', encoding='utf-8') as f:
-                            rec_data = json.load(f)
-                        
-                        rec_formatted_sent = await send_formatted_recommendations(chat_id, rec_data)
-                        
-                        # Затем отправляем исходный JSON-файл как документ для сохранения
-                        logger.info(f"Attempting to send Recommendations JSON file: {rec_path}")
-                        with open(rec_path, 'rb') as json_file:
-                            json_bytes = json_file.read()
-                            mime_type = "application/json"
-                            file_name = os.path.basename(rec_path)
-                            
-                            await context.bot.send_document(
-                                chat_id=chat_id, 
-                                document=InputFile(io.BytesIO(json_bytes), filename=file_name),
-                                caption="Стратегические рекомендации (JSON для сохранения)",
-                                parse_mode="HTML"
-                            )
-                        logger.info(f"Отправлен файл рекомендаций: {rec_path}")
-                        results_sent = True
-                    except Exception as e:
-                        logger.error(f"Не удалось отправить файл рекомендаций {rec_path}: {e}")
-                        try:
-                            await message.reply_text("Не удалось отправить файл рекомендаций.")
-                        except Exception as reply_e:
-                            logger.error(f"Failed to send error reply for Recommendations JSON: {reply_e}")
-                else:
-                    logger.warning(f"Recommendations JSON path found in stdout, but file does not exist at: {rec_path}")
-            else:
-                logger.info("No Recommendations JSON path found in stdout.")
-
-            # --- PDF or Fallback Sending TeX file --- 
-            if pdf_path and os.path.exists(pdf_path):
-                logger.info(f"Checking existence of PDF: {pdf_path}")
-                pdf_size_mb = os.path.getsize(pdf_path) / (1024 * 1024)
-                logger.info(f"PDF file size: {pdf_size_mb:.2f} MB")
-                try:
-                    logger.info(f"Attempting to send PDF file: {pdf_path}")
-                    
+                    logger.info(f"Отправка PDF отчета: {pdf_path}")
                     with open(pdf_path, 'rb') as pdf_file:
-                        pdf_bytes = pdf_file.read()  # Read file into memory
-                        
-                        # Explicitly specify the MIME type
-                        mime_type = "application/pdf"
-                        file_name = os.path.basename(pdf_path)
-                        
-                        await context.bot.send_document(
-                            chat_id=chat_id, 
-                            document=InputFile(io.BytesIO(pdf_bytes), filename=file_name),
-                            caption="Отчет анализа (PDF)",
-                            parse_mode="HTML"
-                        )
-                    logger.info(f"Отправлен PDF отчет: {pdf_path}")
-                    results_sent = True
+                         await context.bot.send_document(chat_id=chat_id, document=pdf_file, connect_timeout=60, read_timeout=60)
+                    sent_files = True
+                except telegram.error.NetworkError as ne:
+                     logger.error(f"Ошибка сети при отправке PDF отчета: {ne}. Попытка увеличения таймаута.")
+                     try:
+                         with open(pdf_path, 'rb') as pdf_file:
+                             await context.bot.send_document(chat_id=chat_id, document=pdf_file, connect_timeout=120, read_timeout=120)
+                         sent_files = True
+                     except Exception as e_retry:
+                         logger.error(f"Повторная ошибка отправки PDF: {e_retry}")
+                         await responder.reply_text("Не удалось отправить PDF отчет из-за проблем с сетью.")
+
                 except Exception as e:
-                    logger.error(f"Не удалось отправить PDF {pdf_path}: {e}")
-                    try:
-                        await message.reply_text("Не удалось отправить PDF отчет.")
-                    except Exception as reply_e:
-                        logger.error(f"Failed to send error reply for PDF: {reply_e}")
-            elif tex_path and os.path.exists(tex_path): # Only if PDF path wasn't found or file doesn't exist
-                logger.info("PDF path missing or file not found, attempting fallback to TeX file.")
-                logger.info(f"Checking existence of Fallback TeX: {tex_path}")
-                try:
-                    logger.info(f"Attempting to send Fallback TeX file: {tex_path}")
-                    
-                    with open(tex_path, 'rb') as tex_file:
-                        tex_bytes = tex_file.read()  # Read file into memory
-                        
-                        # Explicitly specify the MIME type
-                        mime_type = "application/x-tex"
-                        file_name = os.path.basename(tex_path)
-                        
-                        await context.bot.send_document(
-                            chat_id=chat_id, 
-                            document=InputFile(io.BytesIO(tex_bytes), filename=file_name),
-                            caption="Отчет анализа (TeX файл)",
-                            parse_mode="HTML"
-                        )
-                    logger.info(f"Отправлен LaTeX отчет (.tex): {tex_path}")
-                    results_sent = True
-                except Exception as e:
-                    logger.error(f"Не удалось отправить LaTeX отчет {tex_path}: {e}")
-                    try:
-                        await message.reply_text("Не удалось отправить LaTeX отчет (.tex).")
-                    except Exception as reply_e:
-                        logger.error(f"Failed to send error reply for Fallback TeX: {reply_e}")
+                    logger.error(f"Ошибка отправки PDF отчета: {e}", exc_info=True)
+                    await responder.reply_text("Не удалось отправить PDF отчет.")
             else:
-                logger.warning(f"Neither PDF nor TeX files found or could be sent")
-
-            if not results_sent:
-                # If after all attempts nothing was sent, inform the user
-                logger.warning("No results were successfully sent to the user.")
-                await message.reply_text("Не удалось найти или отправить файлы результатов после анализа.")
-
-            # Очистка: удаляем папку с результатами
-            if output_dir and os.path.exists(output_dir) and output_dir.startswith("analysis_outputs/"):
+                logger.warning(f"PDF отчет не найден для {base_filename} в {results_dir}")
+                # Debug: list files in dir
                 try:
-                    # Use absolute path for safety? Though relative should work if bot CWD is /app
-                    # output_dir_abs = os.path.join(SCRIPT_DIR, output_dir) # If needed
-                    shutil.rmtree(output_dir)
-                    logger.info(f"Удалена директория с результатами: {output_dir}")
+                    files_in_dir = os.listdir(results_dir)
+                    logger.debug(f"Файлы в директории {results_dir}: {files_in_dir}")
+                except Exception as list_e:
+                    logger.error(f"Не удалось прочитать директорию {results_dir}: {list_e}")
+
+
+            if heatmap_files:
+                heatmap_path = str(heatmap_files[0])
+                try:
+                    logger.info(f"Отправка тепловой карты: {heatmap_path}")
+                    with open(heatmap_path, 'rb') as hm_file:
+                        await context.bot.send_photo(chat_id=chat_id, photo=hm_file, connect_timeout=60, read_timeout=60)
+                    sent_files = True
+                except telegram.error.NetworkError as ne:
+                     logger.error(f"Ошибка сети при отправке тепловой карты: {ne}. Попытка увеличения таймаута.")
+                     try:
+                         with open(heatmap_path, 'rb') as hm_file:
+                             await context.bot.send_photo(chat_id=chat_id, photo=hm_file, connect_timeout=120, read_timeout=120)
+                         sent_files = True
+                     except Exception as e_retry:
+                         logger.error(f"Повторная ошибка отправки тепловой карты: {e_retry}")
+                         await responder.reply_text("Не удалось отправить тепловую карту из-за проблем с сетью.")
+
                 except Exception as e:
-                    logger.error(f"Не удалось удалить директорию {output_dir}: {e}")
-            elif output_dir:
-                logger.warning(f"Директория для удаления не найдена или небезопасна: {output_dir}")
+                    logger.error(f"Ошибка отправки тепловой карты: {e}", exc_info=True)
+                    await responder.reply_text("Не удалось отправить тепловую карту.")
+            else:
+                logger.warning(f"Тепловая карта не найдена для {base_filename} в {results_dir}")
+                 # Debug: list files in dir (if not already done for PDF)
+                if not pdf_files: # Avoid listing twice if both are missing
+                    try:
+                        files_in_dir = os.listdir(results_dir)
+                        logger.debug(f"Файлы в директории {results_dir}: {files_in_dir}")
+                    except Exception as list_e:
+                        logger.error(f"Не удалось прочитать директорию {results_dir}: {list_e}")
 
-            # --- ENHANCED DEBUGGING FOR COORDINATES, HEATMAP, AND PDF ISSUES ---
-            # Extra debug logging for coordinates file
-            gemini_coords_parsed = None
-            for line in stdout_str.splitlines():
-                if "Распарсенный Gemini ответ сохранен в:" in line:
-                    gemini_coords_parsed = line.split("Распарсенный Gemini ответ сохранен в:", 1)[1].strip()
-                    logger.info(f"FOUND COORDINATES FILE PATH: {gemini_coords_parsed}")
-                    if os.path.exists(gemini_coords_parsed):
-                        try:
-                            with open(gemini_coords_parsed, 'r', encoding='utf-8') as f:
-                                coords_data = json.load(f)
-                                coords_count = len(coords_data.get("element_coordinates", []))
-                                logger.info(f"COORDINATES FILE EXISTS with {coords_count} elements")
-                        except Exception as e:
-                            logger.error(f"ERROR READING COORDINATES FILE: {e}")
-                    else:
-                        logger.error(f"COORDINATES FILE NOT FOUND AT: {gemini_coords_parsed}")
-            
-            # Extra debug logging for heatmap file
-            heatmap_path = None
-            for line in stdout_str.splitlines():
-                if "Тепловая карта успешно сгенерирована и сохранена в:" in line:
-                    heatmap_path = line.split("Тепловая карта успешно сгенерирована и сохранена в:", 1)[1].strip()
-                    logger.info(f"FOUND HEATMAP FILE PATH: {heatmap_path}")
-                    if os.path.exists(heatmap_path):
-                        heatmap_size_mb = os.path.getsize(heatmap_path) / (1024 * 1024)
-                        logger.info(f"HEATMAP FILE EXISTS with size: {heatmap_size_mb:.2f} MB")
-                    else:
-                        logger.error(f"HEATMAP FILE NOT FOUND AT: {heatmap_path}")
-            
-            # Extra debug logging for PDF generation
-            pdf_path = None
-            tex_path = None
-            for line in stdout_str.splitlines():
-                if ".pdf" in line and "✅ PDF Отчет:" in line:
-                    pdf_path = line.split("✅ PDF Отчет:", 1)[1].strip()
-                    logger.info(f"FOUND PDF FILE PATH: {pdf_path}")
-                    if os.path.exists(pdf_path):
-                        pdf_size_mb = os.path.getsize(pdf_path) / (1024 * 1024)
-                        logger.info(f"PDF FILE EXISTS with size: {pdf_size_mb:.2f} MB")
-                    else:
-                        logger.error(f"PDF FILE NOT FOUND AT: {pdf_path}")
-                        
-                        # Check if tex file exists
-                        tex_path = pdf_path.replace(".pdf", ".tex")
-                        if os.path.exists(tex_path):
-                            logger.info(f"TEX FILE EXISTS at: {tex_path}")
-                            # Check log file for errors
-                            log_path = tex_path.replace(".tex", ".log")
-                            if os.path.exists(log_path):
-                                try:
-                                    with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
-                                        log_tail = f.readlines()[-20:]  # Get last 20 lines
-                                        logger.error(f"PDF GENERATION LOG (last 20 lines): {''.join(log_tail)}")
-                                except Exception as e:
-                                    logger.error(f"Error reading log file: {e}")
-                        else:
-                            logger.error(f"TEX FILE NOT FOUND AT: {tex_path}")
-            
-            # ... rest of the existing code ...
 
-        except Exception as e:
-            logger.error(f"Error in image handling: {e}")
-            traceback.print_exc()
-            await message.reply_text(f"Произошла ошибка при обработке вашего изображения: {e}")
+            if not sent_files:
+                 await responder.reply_text("Анализ завершен, но не удалось найти файлы результатов (PDF и/или тепловую карту). Проверьте логи.")
+
+        else:
+            logger.error(f"Ошибка выполнения пайплайна для {image_path}. Код возврата: {process.returncode}")
+            logger.error(f"Pipeline stdout:\n{stdout_decoded}")
+            logger.error(f"Pipeline stderr:\n{stderr_decoded}")
+            # Сообщаем пользователю об ошибке
+            error_message = f"Произошла ошибка во время анализа изображения. 😥"
+            # Можно добавить детали из stderr, если это безопасно и информативно
+            if stderr_decoded and len(stderr_decoded) < 500 : # Ограничиваем длину и проверяем наличие
+               error_message += f"\nДетали: {stderr_decoded}"
+            await responder.reply_text(error_message)
+
+    except Exception as e:
+        logger.error(f"Исключение при запуске/обработке пайплайна: {e}", exc_info=True)
+        await responder.reply_text("Произошла непредвиденная ошибка при выполнении анализа.")
+
+    finally:
+        # Очищаем user_data после завершения диалога или ошибки
+        logger.info("Очистка user_data.")
+        context.user_data.clear()
+        # Попытка удалить временное изображение, если оно существует
+        if image_path and os.path.exists(image_path):
+            try:
+                os.remove(image_path)
+                logger.info(f"Удалено временное изображение: {image_path}")
+            except Exception as del_e:
+                logger.warning(f"Не удалось удалить временное изображение {image_path}: {del_e}")
+
+
+    return ConversationHandler.END
+
+async def ask_scenario_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Ответ на кнопку 'Указать сценарий'. Просит пользователя ввести текст."""
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(text="Пожалуйста, введите типичный сценарий использования:")
+    return WAIT_SCENARIO
+
+async def received_scenario(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Сохраняет введенный сценарий и запускает анализ."""
+    user_scenario_text = update.message.text
+    context.user_data['user_scenario'] = user_scenario_text
+    logger.info(f"Получен сценарий: {user_scenario_text}")
+    await update.message.reply_text(f"Сценарий '{user_scenario_text}' сохранен.")
+    # Запускаем анализ
+    return await start_analysis(update, context)
+
+async def skip_scenario(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Обрабатывает пропуск ввода сценария и запускает анализ."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data['user_scenario'] = None # Или "Не указан"
+    logger.info("Пользователь пропустил ввод сценария.")
+    # Запускаем анализ
+    # Важно: используем query для передачи update в start_analysis
+    return await start_analysis(query, context)
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Отменяет текущий диалог."""
+    logger.info("Пользователь отменил диалог.")
+    responder = update.message if hasattr(update, 'message') else update.callback_query.message
+    await responder.reply_text('Действие отменено. Можете отправить новое изображение.')
+    # Очищаем user_data и удаляем временный файл, если он есть
+    image_path = context.user_data.get('image_path')
+    context.user_data.clear()
+    if image_path and os.path.exists(image_path):
+        try:
+            os.remove(image_path)
+            logger.info(f"Удалено временное изображение при отмене: {image_path}")
+        except Exception as del_e:
+            logger.warning(f"Не удалось удалить временное изображение при отмене {image_path}: {del_e}")
+
+    return ConversationHandler.END
+
+# --- Старые внутренние функции (будут перенесены или удалены) ---
+# Helper function to detect MIME type
+# ... (get_mime_type)
+# Функции для форматирования и отправки структурированных данных
+# ... (send_formatted_interpretation)
+# ... (send_formatted_recommendations)
+
+# --- Запуск пайплайна (будет перенесен в start_analysis) ---
+# try:
+#    # Check if pipeline script exists
+#    # ... (pipeline execution code) ...
+# except Exception as e:
+#    # ... (error handling) ...
 
 # --- Обработчик ошибок ---
 
@@ -690,11 +428,32 @@ def main():
     # Создание приложения и передача токена
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
+    # Создание ConversationHandler
+    conv_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.PHOTO | filters.Document.IMAGE, start_conversation)],
+        states={
+            GET_TYPE: [
+                CallbackQueryHandler(ask_type_input, pattern='^specify_type$'),
+                CallbackQueryHandler(skip_type, pattern='^skip_type$'),
+            ],
+            WAIT_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_type)],
+            GET_SCENARIO: [
+                CallbackQueryHandler(ask_scenario_input, pattern='^specify_scenario$'),
+                CallbackQueryHandler(skip_scenario, pattern='^skip_scenario$'),
+            ],
+            WAIT_SCENARIO: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_scenario)],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)],
+         # Можно добавить таймаут ожидания ответа
+        # conversation_timeout=600 # 10 минут
+    )
+
     # Регистрация обработчиков
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    # Updated handler to accept photos OR image documents
-    application.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_image))
+    application.add_handler(conv_handler) # Добавляем ConversationHandler
+    # Убираем старый обработчик изображений, т.к. он теперь entry_point для conv_handler
+    # application.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_image))
 
     # Регистрация обработчика ошибок
     application.add_error_handler(error_handler)

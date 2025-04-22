@@ -78,7 +78,7 @@ def run_command(command, description):
         return False, str(e)
 
 # --- Main Pipeline Logic ---
-def run_pipeline(image_path):
+def run_pipeline(image_path, interface_type="Анализируемый интерфейс", user_scenario="Общий анализ"):
     """Runs the entire analysis pipeline."""
     if not os.path.exists(image_path):
         print(f"!!! Ошибка: Файл изображения не найден по пути {image_path} !!!")
@@ -109,10 +109,7 @@ def run_pipeline(image_path):
 
     try:
         # --- 1. Set Context (No interactive input) ---
-        # Using default values instead of input()
-        interface_type = "Анализируемый интерфейс" 
-        user_scenario = "Общий анализ"
-        print("--- Контекст анализа (задан по умолчанию) ---")
+        print("--- Контекст анализа ---")
         print(f"    Тип интерфейса: {interface_type}")
         print(f"    Сценарий: {user_scenario}")
 
@@ -424,9 +421,21 @@ def run_pipeline(image_path):
         sys.exit(1)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run the full UI analysis pipeline.")
-    parser.add_argument("image_path", help="Path to the input screenshot image.")
-    # Add optional args for prompts if needed later
+    parser = argparse.ArgumentParser(description="Запускает полный пайплайн анализа визуального интерфейса.")
+    parser.add_argument("--image-path", required=True, help="Путь к файлу изображения для анализа.")
+    parser.add_argument("--interface-type", default="Не указан", help="Тип анализируемого интерфейса (например, 'форма регистрации').")
+    parser.add_argument("--user-scenario", default="Не указан", help="Типичный сценарий использования интерфейса (например, 'заполнение профиля').")
+
     args = parser.parse_args()
 
-    run_pipeline(args.image_path) 
+    # Проверяем существование файла изображения перед запуском
+    if not os.path.exists(args.image_path):
+        print(f"!!! КРИТИЧЕСКАЯ ОШИБКА: Файл изображения не найден: {args.image_path} !!!")
+        sys.exit(1) # Выход с ошибкой
+
+    # Запуск основного пайплайна
+    run_pipeline(
+        image_path=args.image_path, 
+        interface_type=args.interface_type, 
+        user_scenario=args.user_scenario
+    ) 
