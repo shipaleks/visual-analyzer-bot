@@ -88,8 +88,12 @@ def query_gemini(prompt_template, analysis_data):
     try:
         print("Sending request to Gemini...")
         # Add safety settings if needed, otherwise use defaults
+        # Explicitly set temperature for more varied responses
+        generation_config = genai.types.GenerationConfig(temperature=0.7)
+        
         response = model.generate_content(
             full_prompt,
+            generation_config=generation_config, # Added generation config
             # safety_settings=[
             #     { "category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE" },
             #     { "category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE" },
