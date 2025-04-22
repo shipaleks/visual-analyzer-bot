@@ -142,8 +142,26 @@ async def start_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def format_and_send_interpretation(chat_id: int, json_path: str, bot):
     """Читает JSON интерпретации, форматирует и отправляет как текст."""
     try:
+        logger.debug(f"Reading interpretation file: {json_path}")
         with open(json_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+            raw_text = f.read()
+        logger.debug(f"Raw interpretation content length: {len(raw_text)}")
+
+        # Парсим текст как JSON
+        try:
+            data = json.loads(raw_text)
+            logger.debug("Successfully parsed interpretation JSON.")
+        except json.JSONDecodeError as json_err:
+            logger.error(f"Ошибка декодирования JSON в файле интерпретации: {json_path} - {json_err}")
+            logger.error(f"Raw text received: {raw_text[:500]}...") # Log beginning of text
+            await bot.send_message(chat_id=chat_id, text=f"Ошибка чтения файла с интерпретацией (неверный формат JSON). Обратитесь к логам.")
+            # Optionally send the raw text as a document for debugging
+            try:
+                with open(json_path, 'rb') as f_err:
+                    await bot.send_document(chat_id=chat_id, document=f_err, caption="Проблемный файл интерпретации (raw)")
+            except Exception as send_e:
+                 logger.error(f"Не удалось отправить проблемный файл: {send_e}")
+            return False
 
         message = "*📊 Интерпретация анализа:*\n\n"
         summary = data.get('analysis_summary', 'Общее резюме не найдено.')
@@ -174,10 +192,6 @@ async def format_and_send_interpretation(chat_id: int, json_path: str, bot):
         logger.error(f"Файл интерпретации не найден для форматирования: {json_path}")
         await bot.send_message(chat_id=chat_id, text="Не удалось найти файл с интерпретацией.")
         return False
-    except json.JSONDecodeError:
-        logger.error(f"Ошибка декодирования JSON в файле интерпретации: {json_path}")
-        await bot.send_message(chat_id=chat_id, text="Ошибка чтения файла с интерпретацией.")
-        return False
     except Exception as e:
         logger.error(f"Ошибка при форматировании/отправке интерпретации: {e}", exc_info=True)
         await bot.send_message(chat_id=chat_id, text="Произошла ошибка при обработке интерпретации.")
@@ -186,8 +200,26 @@ async def format_and_send_interpretation(chat_id: int, json_path: str, bot):
 async def format_and_send_recommendations(chat_id: int, json_path: str, bot):
     """Читает JSON рекомендаций, форматирует и отправляет как текст."""
     try:
+        logger.debug(f"Reading recommendations file: {json_path}")
         with open(json_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+            raw_text = f.read()
+        logger.debug(f"Raw recommendations content length: {len(raw_text)}")
+
+        # Парсим текст как JSON
+        try:
+            data = json.loads(raw_text)
+            logger.debug("Successfully parsed recommendations JSON.")
+        except json.JSONDecodeError as json_err:
+            logger.error(f"Ошибка декодирования JSON в файле рекомендаций: {json_path} - {json_err}")
+            logger.error(f"Raw text received: {raw_text[:500]}...") # Log beginning of text
+            await bot.send_message(chat_id=chat_id, text=f"Ошибка чтения файла с рекомендациями (неверный формат JSON). Обратитесь к логам.")
+             # Optionally send the raw text as a document for debugging
+            try:
+                with open(json_path, 'rb') as f_err:
+                    await bot.send_document(chat_id=chat_id, document=f_err, caption="Проблемный файл рекомендаций (raw)")
+            except Exception as send_e:
+                 logger.error(f"Не удалось отправить проблемный файл: {send_e}")
+            return False
 
         recommendations = data.get('recommendations', [])
         if not recommendations:
@@ -212,10 +244,6 @@ async def format_and_send_recommendations(chat_id: int, json_path: str, bot):
     except FileNotFoundError:
         logger.error(f"Файл рекомендаций не найден для форматирования: {json_path}")
         await bot.send_message(chat_id=chat_id, text="Не удалось найти файл с рекомендациями.")
-        return False
-    except json.JSONDecodeError:
-        logger.error(f"Ошибка декодирования JSON в файле рекомендаций: {json_path}")
-        await bot.send_message(chat_id=chat_id, text="Ошибка чтения файла с рекомендациями.")
         return False
     except Exception as e:
         logger.error(f"Ошибка при форматировании/отправке рекомендаций: {e}", exc_info=True)
