@@ -16,74 +16,32 @@ from pathlib import Path # Added import
 from dotenv import load_dotenv # Added import
 import firebase_admin # Added import
 from firebase_admin import credentials, firestore # Added import
-import io # Импортируем io
 
 # --- Firebase Initialization ---
-load_dotenv() # Load .env file for local testing
+load_dotenv() # Load .env file which should contain GOOGLE_APPLICATION_CREDENTIALS
+try:
+    # Initialize Firebase Admin SDK using application default credentials
+    # This automatically looks for GOOGLE_APPLICATION_CREDENTIALS env variable
+    # If using a specific path: cred = credentials.Certificate(os.getenv('FIREBASE_SERVICE_ACCOUNT_KEY_PATH'))
+    # firebase_admin.initialize_app(cred)
+    firebase_admin.initialize_app()
+    print("--- Firebase Admin SDK инициализирован --- ")
+except ValueError as e:
+    # Handle cases where it might be initialized multiple times if script is re-run somehow
+    if "The default Firebase app already exists" in str(e):
+        print("--- Firebase Admin SDK уже был инициализирован --- ")
+    else:
+        print(f"!!! Ошибка инициализации Firebase: {e} !!!")
+except Exception as e:
+    print(f"!!! Неожиданная ошибка инициализации Firebase: {e} !!!")
 
-# --- ОТЛАДКА: Проверка переменной окружения ---
-creds_json_str = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-if not creds_json_str:
-    print("!!! ОТЛАДКА: Переменная окружения GOOGLE_APPLICATION_CREDENTIALS не найдена или пуста!")
-    db = None # Установим db в None, если переменная не найдена
-else:
-    print("--- ОТЛАДКА: Переменная GOOGLE_APPLICATION_CREDENTIALS найдена. Попытка парсинга JSON...")
-    try:
-        # Попытка загрузить JSON, чтобы убедиться, что он валиден
-        creds_info = json.loads(creds_json_str)
-        print(f"--- ОТЛАДКА: JSON из переменной успешно распарсен. Project ID: {creds_info.get('project_id')} ---")
-
-        # --- Явная инициализация из строки JSON ---
-        # Оборачиваем строку в файлоподобный объект
-        creds_json_io = io.StringIO(creds_json_str)
-        cred = credentials.Certificate(creds_json_io)
-
-        # Инициализация с явно указанными учетными данными
-        try:
-             if not firebase_admin._apps: # Проверяем, не инициализировано ли уже
-                firebase_admin.initialize_app(cred) # Используем явные credentials
-                print("--- Firebase Admin SDK инициализирован (явно из переменной) --- ")
-             else:
-                 print("--- Firebase Admin SDK уже был инициализирован --- ")
-
-             # Get Firestore client
-             try:
-                 db = firestore.client()
-                 print("--- Firestore клиент получен успешно --- ")
-             except Exception as e:
-                 print(f"!!! Ошибка получения Firestore клиента ПОСЛЕ ЯВНОЙ ИНИЦИАЛИЗАЦИИ: {e} !!!")
-                 db = None
-        except ValueError as e:
-             if "The default Firebase app already exists" in str(e):
-                 print("--- Firebase Admin SDK уже был инициализирован (value error) --- ")
-                 # Если уже инициализировано, пытаемся получить клиент существующего приложения
-                 try:
-                     db = firestore.client()
-                     print("--- Firestore клиент получен (из уже инициализированного приложения) --- ")
-                 except Exception as e_inner:
-                     print(f"!!! Ошибка получения Firestore клиента из уже инициализированного приложения: {e_inner} !!!")
-                     db = None
-             else:
-                 print(f"!!! Ошибка явной инициализации Firebase: {e} !!!")
-                 db = None
-        except Exception as e:
-             print(f"!!! Неожиданная ошибка явной инициализации Firebase: {e} !!!")
-             db = None
-
-    except json.JSONDecodeError as e:
-        print(f"!!! ОТЛАДКА: Ошибка парсинга JSON из GOOGLE_APPLICATION_CREDENTIALS: {e} !!!")
-        print("!!! ПОЖАЛУЙСТА, ПРОВЕРЬТЕ ЗНАЧЕНИЕ ПЕРЕМЕННОЙ В RAILWAY - ОНО ДОЛЖНО БЫТЬ ВАЛИДНЫМ JSON !!!")
-        db = None
-    except Exception as e:
-        print(f"!!! ОТЛАДКА: Неожиданная ошибка при обработке переменной: {e} !!!")
-        db = None
-
-# --- КОНЕЦ ОТЛАДКИ ---
-
-# Если инициализация выше не удалась, db будет None
-if 'db' not in locals() or db is None: # Добавил проверку на None
-    print("!!! Инициализация Firebase не удалась или клиент не получен.")
-    db = None # Убедимся, что db None, если что-то пошло не так
+# Get Firestore client
+try:
+    db = firestore.client()
+    print("--- Firestore клиент получен --- ")
+except Exception as e:
+    print(f"!!! Ошибка получения Firestore клиента: {e} !!!")
+    db = None # Set db to None if client fails
 
 # --- Configuration ---
 # Определяем абсолютные пути к скриптам относительно текущего файла
