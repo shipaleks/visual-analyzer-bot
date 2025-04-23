@@ -13,6 +13,35 @@ from datetime import datetime
 import shutil
 import traceback # Added import
 from pathlib import Path # Added import
+from dotenv import load_dotenv # Added import
+import firebase_admin # Added import
+from firebase_admin import credentials, firestore # Added import
+
+# --- Firebase Initialization ---
+load_dotenv() # Load .env file which should contain GOOGLE_APPLICATION_CREDENTIALS
+try:
+    # Initialize Firebase Admin SDK using application default credentials
+    # This automatically looks for GOOGLE_APPLICATION_CREDENTIALS env variable
+    # If using a specific path: cred = credentials.Certificate(os.getenv('FIREBASE_SERVICE_ACCOUNT_KEY_PATH'))
+    # firebase_admin.initialize_app(cred)
+    firebase_admin.initialize_app()
+    print("--- Firebase Admin SDK инициализирован --- ")
+except ValueError as e:
+    # Handle cases where it might be initialized multiple times if script is re-run somehow
+    if "The default Firebase app already exists" in str(e):
+        print("--- Firebase Admin SDK уже был инициализирован --- ")
+    else:
+        print(f"!!! Ошибка инициализации Firebase: {e} !!!")
+except Exception as e:
+    print(f"!!! Неожиданная ошибка инициализации Firebase: {e} !!!")
+
+# Get Firestore client
+try:
+    db = firestore.client()
+    print("--- Firestore клиент получен --- ")
+except Exception as e:
+    print(f"!!! Ошибка получения Firestore клиента: {e} !!!")
+    db = None # Set db to None if client fails
 
 # --- Configuration ---
 # Определяем абсолютные пути к скриптам относительно текущего файла
@@ -77,6 +106,66 @@ def run_command(command, description):
         traceback.print_exc() # Print traceback for unexpected errors
         print(f"--- Ошибка: {description} ---")
         return False, str(e)
+
+# --- Function to save metrics --- 
+def save_metrics_to_firebase(gpt_json_path, run_id, img_path, iface_type, scenario):
+    """Loads metrics from GPT analysis JSON and saves them to Firestore."""
+    if not db:
+        print("!!! Firestore клиент недоступен, пропуск сохранения метрик !!!")
+        return
+
+    print(f"--- Попытка сохранения метрик из {gpt_json_path} в Firebase ---")
+    try:
+        with open(gpt_json_path, 'r', encoding='utf-8') as f:
+            analysis_data = json.load(f)
+
+        # Ищем ключ с метриками (предполагаем 'complexityScores')
+        metrics_data = analysis_data.get('complexityScores')
+
+        # Дополнительная проверка, если ключ верхнего уровня не найден
+        if not metrics_data:
+            if 'analysis_results' in analysis_data and isinstance(analysis_data['analysis_results'], dict):
+                 metrics_data = analysis_data['analysis_results'].get('complexityScores')
+
+        if not metrics_data or not isinstance(metrics_data, dict):
+            # Пытаемся найти другой ключ, если 'complexityScores' не сработал
+            found_metrics = False
+            for key, value in analysis_data.items():
+                 # Ищем словарь, который содержит много числовых значений (эвристика)
+                 if isinstance(value, dict) and len(value) > 10 and sum(isinstance(v, (int, float)) for v in value.values()) > len(value) * 0.7:
+                      print(f"Найдены возможные метрики под ключом: '{key}'")
+                      metrics_data = value
+                      found_metrics = True
+                      break
+            if not found_metrics:
+                 print(f"!!! Ключ 'complexityScores' или похожий не найден в {gpt_json_path} или данные не являются словарем. Пропуск сохранения метрик.")
+                 # Debug: print top-level keys
+                 print(f"Top-level keys in {gpt_json_path}: {list(analysis_data.keys())}")
+                 return
+
+        # Подготовка данных для Firestore
+        data_to_save = {
+            'run_id': run_id, # Используем run_timestamp как ID запуска
+            'timestamp': firestore.SERVER_TIMESTAMP, # Используем серверное время Firebase
+            'image_reference': Path(img_path).name, # Сохраняем только имя файла изображения
+            'interface_type': iface_type,
+            'user_scenario': scenario,
+            'metrics': metrics_data # Сохраняем весь словарь метрик
+        }
+
+        # Добавляем документ в коллекцию 'analysis_metrics'
+        # Используем run_id как ID документа для предотвращения дубликатов при перезапуске
+        doc_ref = db.collection('analysis_metrics').document(run_id)
+        doc_ref.set(data_to_save)
+        print(f"--- Метрики успешно сохранены/обновлены в Firebase. Document ID: {run_id} ---")
+
+    except FileNotFoundError:
+        print(f"!!! Ошибка: Файл {gpt_json_path} не найден. Не могу сохранить метрики.")
+    except json.JSONDecodeError:
+        print(f"!!! Ошибка: Не удалось декодировать JSON из {gpt_json_path}. Не могу сохранить метрики.")
+    except Exception as e:
+        print(f"!!! Неожиданная ошибка при сохранении метрик в Firebase: {e}")
+        traceback.print_exc()
 
 # --- Main Pipeline Logic ---
 def run_pipeline(image_path, interface_type="Анализируемый интерфейс", user_scenario="Общий анализ"):
@@ -145,6 +234,22 @@ def run_pipeline(image_path, interface_type="Анализируемый инте
             else:
                 print(f"    Результат GPT анализа сохранен в: {gpt_analysis_output}")
                 print("--- Успешно: GPT-4.1 Анализ ---")
+
+            # --- Save Metrics to Firebase ---
+            if pipeline_success and os.path.exists(gpt_analysis_output) and db: # Проверяем, что анализ успешен, файл есть и db инициализирован
+                 save_metrics_to_firebase(
+                     gpt_json_path=gpt_analysis_output,
+                     run_id=run_timestamp, # Передаем run_timestamp
+                     img_path=image_path, # Передаем исходный путь к картинке
+                     iface_type=interface_type,
+                     scenario=user_scenario
+                 )
+            elif not db:
+                 print("--- Пропуск сохранения метрик в Firebase (клиент не инициализирован) ---")
+            elif not os.path.exists(gpt_analysis_output):
+                 print("--- Пропуск сохранения метрик в Firebase (файл анализа GPT не найден) ---")
+            elif not pipeline_success:
+                 print("--- Пропуск сохранения метрик в Firebase (анализ GPT завершился с ошибкой) ---")
 
         except ImportError as e:
             print(f"!!! Ошибка импорта функций из tests/api_test.py: {e} !!!")
