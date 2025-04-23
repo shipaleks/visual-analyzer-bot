@@ -158,8 +158,8 @@ async def format_and_send_interpretation(chat_id: int, json_path: str, bot):
                 with open(json_path, 'rb') as f_err:
                     await bot.send_document(chat_id=chat_id, document=f_err, caption="Проблемный файл интерпретации (raw)")
             except Exception as send_e:
-                 logger.error(f"Не удалось отправить проблемный файл: {send_e}")
-            return False
+                logger.error(f"Не удалось отправить проблемный файл: {send_e}")
+                return False
 
         interpretation_data = data.get('strategicInterpretation')
         if not interpretation_data or not isinstance(interpretation_data, dict):
@@ -198,14 +198,13 @@ async def format_and_send_interpretation(chat_id: int, json_path: str, bot):
              return True
         else:
              logger.warning(f"Не найдено данных для отправки в strategicInterpretation в файле {json_path}")
-             await bot.send_message(chat_id=chat_id, text="*📊 Стратегическая интерпретация:*\n\nДанные в файле не найдены или пусты.", parse_mode='Markdown')
+             await bot.send_message(chat_id=chat_id, text="*📊 Стратегическая интерпретация:*\\n\\nДанные в файле не найдены или пусты.", parse_mode='Markdown')
              return False
 
     except FileNotFoundError:
         logger.error(f"Файл интерпретации не найден для форматирования: {json_path}")
         await bot.send_message(chat_id=chat_id, text="Не удалось найти файл с интерпретацией.")
         return False
-    # Общий Exception для других непредвиденных ошибок
     except Exception as e:
         logger.error(f"Ошибка при форматировании/отправке интерпретации: {e}", exc_info=True)
         await bot.send_message(chat_id=chat_id, text="Произошла ошибка при обработке интерпретации.")
@@ -230,8 +229,8 @@ async def format_and_send_recommendations(chat_id: int, json_path: str, bot):
                 with open(json_path, 'rb') as f_err:
                     await bot.send_document(chat_id=chat_id, document=f_err, caption="Проблемный файл рекомендаций (raw)")
             except Exception as send_e:
-                 logger.error(f"Не удалось отправить проблемный файл: {send_e}")
-            return False
+                logger.error(f"Не удалось отправить проблемный файл: {send_e}")
+                return False
 
         recommendations_list = data.get('strategicRecommendations')
         if not recommendations_list or not isinstance(recommendations_list, list):
@@ -280,14 +279,13 @@ async def format_and_send_recommendations(chat_id: int, json_path: str, bot):
             return True
         else:
              logger.warning(f"Не найдено валидных данных для отправки в strategicRecommendations в файле {json_path}")
-             await bot.send_message(chat_id=chat_id, text="*💡 Стратегические рекомендации:*\n\nДанные в файле не найдены или пусты.", parse_mode='Markdown')
+             await bot.send_message(chat_id=chat_id, text="*💡 Стратегические рекомендации:*\\n\\nДанные в файле не найдены или пусты.", parse_mode='Markdown')
              return False
 
     except FileNotFoundError:
         logger.error(f"Файл рекомендаций не найден для форматирования: {json_path}")
         await bot.send_message(chat_id=chat_id, text="Не удалось найти файл с рекомендациями.")
         return False
-    # Общий Exception для других непредвиденных ошибок
     except Exception as e:
         logger.error(f"Ошибка при форматировании/отправке рекомендаций: {e}", exc_info=True)
         await bot.send_message(chat_id=chat_id, text="Произошла ошибка при обработке рекомендаций.")
@@ -428,12 +426,14 @@ async def start_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         process = await asyncio.create_subprocess_exec(
             *command,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
+            env=os.environ.copy()  # Явно передаем копию текущего окружения
         )
         stdout, stderr = await process.communicate() # Ждем завершения
-        stdout_decoded = stdout.decode().strip() if stdout else ""
-        stderr_decoded = stderr.decode().strip() if stderr else ""
 
+        # Декодирование stdout и stderr
+        stdout_decoded = stdout.decode('utf-8', errors='replace').strip() if stdout else ""
+        stderr_decoded = stderr.decode('utf-8', errors='replace').strip() if stderr else ""
 
         if process.returncode == 0:
             logger.info(f"Пайплайн успешно завершен для {image_path}.")
@@ -565,16 +565,16 @@ async def start_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             elif sent_files_count < 4: # Если отправлены не все 4 файла (PDF, PNG, 2xJSON)
                  await responder.reply_text("Анализ завершен, но не все файлы результатов удалось отправить. Проверьте сообщения выше и логи.")
 
-        else:
-            logger.error(f"Ошибка выполнения пайплайна для {image_path}. Код возврата: {process.returncode}")
-            logger.error(f"Pipeline stdout:\n{stdout_decoded}")
-            logger.error(f"Pipeline stderr:\n{stderr_decoded}")
-            # Сообщаем пользователю об ошибке
-            error_message = f"Произошла ошибка во время анализа изображения. 😥"
-            # Можно добавить детали из stderr, если это безопасно и информативно
-            if stderr_decoded and len(stderr_decoded) < 500 : # Ограничиваем длину и проверяем наличие
-               error_message += f"\nДетали: {stderr_decoded}"
-            await responder.reply_text(error_message)
+            else:
+                logger.error(f"Ошибка выполнения пайплайна для {image_path}. Код возврата: {process.returncode}")
+                logger.error(f"Pipeline stdout:\n{stdout_decoded}")
+                logger.error(f"Pipeline stderr:\n{stderr_decoded}")
+                # Сообщаем пользователю об ошибке
+                error_message = f"Произошла ошибка во время анализа изображения. 😥"
+                # Можно добавить детали из stderr, если это безопасно и информативно
+                if stderr_decoded and len(stderr_decoded) < 500 : # Ограничиваем длину и проверяем наличие
+                   error_message += f"\nДетали: {stderr_decoded}"
+                await responder.reply_text(error_message)
 
     except Exception as e:
         logger.error(f"Исключение при запуске/обработке пайплайна: {e}", exc_info=True)
